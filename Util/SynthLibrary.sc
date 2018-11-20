@@ -29,7 +29,8 @@ inside a provided library path.
 
 @usage
 
-Synthe.load();
+x = Synthe.load();
+x.gui;
 */
 Synthe {
 	classvar <synthdefs, <>path, <synthsFolderPath, <synthsFullPath, <fileNames;
@@ -100,7 +101,7 @@ Synthe {
 		var decorator, styler, subStyler, childView, childDecorator, substyler;
 		var subView, btn, key, s_info;
 		var searchText, searchList, searchTypeDropdown1, searchTypeDropdown2;
-		var width=300, height=800, lineheight;
+		var width=300, height=800, lineheight=20;
 		var findFunc;
 		if(synthdefs.isNil) { this.load };
 
