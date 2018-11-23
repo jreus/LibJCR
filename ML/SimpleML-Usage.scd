@@ -33,6 +33,9 @@ v = {|selector, start=(-5), stop=5|
 };
 );
 
+
+
+
 // Activation functions are important as a choice in dissective practice...
 v.(\step);
 v.(\sigmoid);
@@ -49,100 +52,68 @@ v.(\valley);
 // Waveshaping through a Perceptron? It would essentially be linear classification or prediction...
 // This may be interesting if the "training data" is also dynamic in some way...
 
-//*****
-// Linear Regression
-//*****
-// some toy data with a linear relationship...
-~dp = 100;
-~xdata = Array.series(~dp, 0, 1.0 / ~dp) + Array.fill(~dp, {rrand(-0.15, 0.15)});
-~ydata = Array.series(~dp, 0, 1.0 / ~dp) + Array.fill(~dp, {rrand(-0.15, 0.15)});
-~asPoints = ~xdata.collect {|item,i| [item, ~ydata[i]] };
-r = LinearRegression.new;
 
 
-// Plot the data
+/*******************************
+// Simple ScatterView Usage
+********************************/
+(
+// Generate some toy data with a linear relationship
+n = 100;
+x = Array.series(n, 0.0, 100 / n) + Array.fill(n, {rrand(-10.0, 10.0)}).round(0.01);
+y = Array.series(n, 1.0, 100 / n) + Array.fill(n, {rrand(-10.0, 10.0)}).round(0.01);
+p = x.collect {|item,i| [item, y[i]] }; // as points
+
+// Plot
 b = Rect(0,0, 800, 600);
 w = Window.new(bounds: b);
-j = JScatterView.new(w, b, ~asPoints).drawAxis_(true).symbolColor_(Color.red).drawMethod_(\fillOval).symbolSize_(5@5);
-k = JScatterView.new(w, b, [[0,r.predict(0)],[1,r.predict(1)]]).background_(Color.clear).symbolColor_(Color.blue);
+j = ScatterView.new(w, b, p, [0,100].asSpec, [0,100].asSpec);
+j.symbolColor_(Color.blue).drawMethod_(\fillOval).symbolSize_(5@5);
 w.front;
-
-
-
-
-r.predict(10);
-r.m_term;
-r.b_term;
-
-(
-Ndef('reg', {arg freq=50,  modhz=8, mult=1.02, fmodhz=1, amp=1.0;
-	var sig;
-	sig = Saw.ar(Array.geom(30, 1.0, mult) * freq, mul: 0.1).sum;
-	sig = BLowPass4.ar(sig, LFTri.ar(SinOsc.ar(fmodhz).range(1,20)).range(500,6700), 0.5);// + (sig*0.1);
-	sig = (sig*2).tanh;
-
-	//sig = GVerb.ar(sig, 100, 2, 0.0, 0.0, 25, 1, 0.5, 0.5);
-	sig = CombL.ar(sig, 1, 0.05, 2) + sig;
-	sig = (sig*2).tanh;
-	sig = Pan2.ar(sig,0,SinOsc.ar(modhz)) * amp * 1.0;
-	sig = Limiter.ar(LeakDC.ar(sig), 1, 0.001);
-}).play(out: 0, numChannels: 2);
 );
 
+// Show axis, grid and value labels
+j.drawAxes_(true).drawGrid_(true).drawValues_(true).refresh;
 
-(
-r.callback = {arg model, error;
-	var line = [[0, model.predict(0)],[1, model.predict(1)]];
-	{
-		k.data_(line).refresh(); // update the plot
-		Ndef('reg').set(\freq, (model.m_term.abs * 170) + 30, \modhz, (model.b_term.abs.reciprocal+0.01), \mult, 1.0 + (error / 10), \fmodhz, error*3 );
+// Visual style
+j.axisColor_(Color.gray(0.3)).gridColor_(Color.red).valuesColor_(Color.gray(0.7)).backgroundColor_(Color.black).refresh;
 
-	}.fork(AppClock);
-};
-);
 
+// Adjust axes & scale
+j.setAxes([-50, 150, \lin].asSpec, [-50,150,\lin].asSpec).symbolSize_(3@3).drawValues_(false).refresh;
+j.setAxes([1, 150, \exp].asSpec, [0, 100,\lin].asSpec).symbolSize_(5@5).drawGridValues_(true).refresh;
 
 
 
-r.train(~xdata, ~ydata, 3000, 0.005, 0.05);
 
-// reset the model
-(
-r.m_term = rrand(-1.0, 1.0);
-r.b_term = rrand(0.0, 1.0);
-);
+r = [1,100,\exp].asSpec;
+r.minval;
+r.maxval;
+r.unmap(1);
 
-// change the dataset
-(
-~dp = 100;
-~xdata = Array.series(~dp, 0.0, 1.0 / ~dp) + Array.fill(~dp, {rrand(-0.25, 0.15)});
-~ydata = Array.series(~dp, 1.0, -1.0 / ~dp) + Array.fill(~dp, {rrand(-0.15, 0.15)});
-//~xdata = Array.fill(~dp, {rrand(0.0, 1.0)});
-//~ydata = Array.fill(~dp, {rrand(0.0, 1.0)});
-~asPoints = ~xdata.collect {|item,i| [item, ~ydata[i]] };
-j.data_(~asPoints).refresh;
-);
+j.drawGrid
 
-// TODO:
-/*
-Be able to change the delaytime in realtime
-Be able to change the training data in realtime
-Be able to start/stop a training/modelling process...
-*/
+j.gridColor_(Color.red).refresh
+j.axisColor_(Color.gray(0.9)).refresh
+j.gridColor
+j.axisColor
+
+Color.gray(0.1)
+Color.black
+Color.white
 
 
-r.predict(0)
-r.predict(1)
+// TODO: Add grid functionality
+
+// TODO: Layered plots / ScatterPlotterView to manage multiple dataset plots with different colors and to synch their axes
+// TODO: Test/Add resizing ... make behavior a bit more normal, with a new window created when no parent is specified..
+// TODO: Add help files
 
 
+/*******************************
+// END Simple ScatterView Usage
+********************************/
 
-0.045*0.039
-
-	var <plot, <background;
-	var <>highlightColor, <highlightItem, <>highlightSize, <>isHighlight, <>drawAxis, <>drawValues;
-	var <>xAxisName, <>yAxisName;
-	var <symbolSize, <>symbolColor, <>drawMethod = \lineTo;
-	var <adjustedData, <specX, <specY;
 
 
 /*
