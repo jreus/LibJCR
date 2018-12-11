@@ -98,13 +98,24 @@ JFPS {
 }
 
 
-
 // Add timestamped entries to a log file.
 JLog {
 	var <>fpath;
+	classvar logger;
 
 	*new {|filepath, filename|
 		^super.new.init(filepath, filename);
+	}
+
+	*getLogger {|filepath, filename|
+		if(this.logger.isNil) {
+			this.logger = JLog.new(filepath, filename);
+		};
+		^this.logger;
+	}
+
+	*log {|str=""|
+		this.getLogger.log(str);
 	}
 
 	init {|filepath=nil, filename=nil|
@@ -122,7 +133,7 @@ JLog {
 		};
 	}
 
-	log {|str=""|
+	log {|str|
 		var timestamp, result, fh;
 		timestamp = Date.getDate.asString;
 		result = timestamp + " ### " + str + "\n";
@@ -155,6 +166,9 @@ JLog {
 	m {
 		^this.notemidi;
 	}
+
+	// postln
+	p { ^this.post; }
 }
 
 + Symbol {

@@ -8,7 +8,12 @@ jonathanreus.com
 info@jonathanreus.com
 
 
-TODO:
+**BUGS**
+* export renders XML with multi-line rewrites and actions indented. This is a problem when reloading them especially for rewrites.
+
+********
+
+FEATURES:
 * add auto-numbering of patterns, synthdefs, etc..
 * add in-code macros for flow signal / multigesture/envelope drawing/random envelope system
 * add code that automatically runs to macros
@@ -20,11 +25,21 @@ TODO:
 
 /* USAGE: *********************
 
->>mixer
->>pattern
+Macros.load(); // loads default.xml in the same dir as the classfile for Macros
 
-// disable
-Macro.active = false;
+Macros.add("eq4",nil,"sig = BLowShelf.ar(BPeakEQ.ar(BPeakEQ.ar(BHiShelf.ar(sig, 10000, 1, 0), 4000, 1, 0), 1200, 1, 0), 200, 1, 0);");
+
+Macros.postMacros;
+
+Macros.export; // should write out current macros to file
+
+Macros.active_(false); // disable macros
+
+// Rewrites are written using an input pattern (regexp) and a rewrite (with placeholders)
+// INPUT PATTERN: "s/([A-Za-z0-9_]+)/([A-Za-z0-9_]+)/([A-Za-z0-9_]+)"
+// REWRITE: "Synth($_1, $_2, $_3);"
+// REWRITE may also be a custom rewrite function that takes the input along with an array of arg values
+// REWRITE: {|input,args| "Synth(%,%,%).format(args[0],args[1],args[2])" }
 
 ********************************/
 
@@ -32,7 +47,7 @@ Macro.active = false;
 Macros {
 	classvar isActive;
 	classvar <dict; // global dictionary of Macros by name
-	classvar <byEvalString; // dictionary of Macros by eval string
+	classvar <byInputPattern; // dictionary of Macros by eval string
 	classvar <preProcessorFuncs; // Add additional preprocessor functions on top of the Macros system
 	// this is useful when you want to add additional SC preprocessor work without overwriting the macro system
 	classvar <>parseStr;
@@ -40,7 +55,7 @@ Macros {
 	*initClass {
 		parseStr = ">>";
 		dict = Dictionary.new;
-		byEvalString = Dictionary.new;
+		byInputPattern = Dictionary.new;
 		preProcessorFuncs = List.new;
 	}
 
@@ -56,35 +71,36 @@ Macros {
 			var func, rewrite, mac;
 			mac = Macro.newFromXMLElement(elm);
 			dict.put(mac.name, mac);
-			byEvalString.put(mac.evalString, mac);
+			byInputPattern.put(mac.inputPattern, mac);
 		};
 
 		this.active_(true);
 	}
 
 
-	// write macros as an XML file
+	*asXML {
+		var doc = DOMDocument.new, xml;
+		doc.appendChild(doc.createProcessingInstruction("xml", "version=\"1.0\""));
+		xml = doc.createElement("xml");
+		doc.appendChild(xml);
+		// for each macro: write macro element to the DOM
+		this.dict.keysValuesDo {|key, val, i| val.writeXMLElement(doc, xml) };
+		^doc;
+	}
+
+	// export macros to xml file
 	*export {|filePath|
-		var doc, xml, macro, func, rewrite, txt;
+		var doc;
 
 		if(filePath.isNil) {
 			filePath = "".resolveRelative +/+ "default.xml";
-			while (File.exists(filePath)) {
+			while ( {File.exists(filePath)} ) {
 				filePath = filePath ++ "_2";
 			};
 		};
 
-		doc = DOMDocument.new;
-		doc.appendChild(doc.createProcessingInstruction("xml", "version=\"1.0\""));
-		xml = doc.createElement("xml");
-		doc.appendChild(xml);
-
-		"EXPORTING AS XML...".postln;
-
-		// for each macro: write macro element to the DOM
-		this.dict.keysValuesDo {|key, val, i| val.writeXMLElement(doc, xml) };
-
-		"WRITING TO FILE...".postln;
+		doc = this.asXML;
+		"Writing Macros to file... %".format(filePath).postln;
 		File.use(filePath, "w", {|fp| doc.write(fp) });
 	}
 
@@ -247,7 +263,6 @@ sig = BLowShelf.ar(BPeakEQ.ar(BPeakEQ.ar(BHiShelf.ar(sig, 10000, 1, 0), 4000, 1,
 		^rewrite;
 	}
 
-
 	*active_ {|val=true|
 		var prefunc = nil;
 		if(val == true) {
@@ -257,6 +272,19 @@ sig = BLowShelf.ar(BPeakEQ.ar(BPeakEQ.ar(BHiShelf.ar(sig, 10000, 1, 0), 4000, 1,
 					var doc, pos, mac, rewrite, action, name, linestart;
 					var myscript = code[psLen..];
 					name = myscript;
+					mac = this.dict.at(name);
+					if(mac.isNil) { // try to match against input pattern
+						var it=0, found=false, keyvals = byInputPattern.asAssociations;
+						keyvals.postln;
+						while({found.not && (it < keyvals.size)}) {
+							var kv = keyvals[it];
+							if(kv.key.matchRegexp(myscript)) { mac = kv.value; found=true };
+							it = it+1;
+						};
+					};
+
+					if(mac.notNil) { // matched a macro
+
 					doc = Document.current;
 					pos = doc.selectionStart; // this is where the code was run
 					linestart = pos - 1;
@@ -267,8 +295,7 @@ sig = BLowShelf.ar(BPeakEQ.ar(BPeakEQ.ar(BHiShelf.ar(sig, 10000, 1, 0), 4000, 1,
 					};
 					linestart = linestart + 1;
 
-					mac = this.dict.at(name);
-					rewrite = mac.rewrite;
+					rewrite = mac.rewrite(myscript);
 					action = mac.action;
 					if(rewrite.notNil) {
 						doc.string_(rewrite, linestart, code.size);
@@ -280,6 +307,9 @@ sig = BLowShelf.ar(BPeakEQ.ar(BPeakEQ.ar(BHiShelf.ar(sig, 10000, 1, 0), 4000, 1,
 							var scriptlen = myscript.size() + psLen;
 							code = code[scriptlen..];
 						};
+					};
+					} {// No Macro Matched
+						"Could not evaluate Macro %".format(myscript).postln;
 					};
 				};
 
@@ -304,38 +334,88 @@ sig = BLowShelf.ar(BPeakEQ.ar(BPeakEQ.ar(BHiShelf.ar(sig, 10000, 1, 0), 4000, 1,
 	*postMacros { "Active Macros: ".post; this.listMacros.do {|m| (" "+m).post}; "".postln }
 
 
-	// Register a new macro.
-	*add {|name, evalString=nil, rewrite=nil, action=nil|
-		var newmac = Macro(name,evalString, rewrite, action);
+	/*
+	Register a new macro
+	@param rewrite Either a rewrite pattern (String) or a custom rewrite function
+	*/
+	*add {|name, inputPattern=nil, rewrite=nil, action=nil|
+		var newmac = Macro(name,inputPattern, rewrite, action);
 		this.dict.put(name, newmac);
-		this.byEvalString.put(evalString, newmac);
+		this.byInputPattern.put(inputPattern, newmac);
 		^newmac;
 	}
 }
 
 Macro {
-	var <name, <>evalString, <>rewrite, <>action;
+	// Potentially can have a rewrite function for complex translations from input code to rewrite
+	var <name, <inputPattern, <rewritePattern, <rewriteFunc, <action;
 
-	*new {|name, evalString, rewrite, action|
-		^super.newCopyArgs(name, evalString, rewrite, action);
+	*new {|name, inputPattern, rewrite, action|
+		^super.new.init(name, inputPattern, rewrite, action);
+	}
+
+	init {|nm, ip, rw, act|
+		"NEW MACRO WITH % %".format(nm,ip).postln;
+		name = nm;
+		inputPattern = ip;
+		action = act;
+		if(rw.class == Function) { rewriteFunc = rw } { rewritePattern = rw };
+	}
+
+	/*
+	Returns the rewrite string for a given input string
+	A rewrite pattern string uses argument placeholders: #1# #2# #3#
+	*/
+	rewrite {|input|
+		var placeholders, result, args=[];
+		var parsed;
+		"REWRITING %: % %".format(name, input, inputPattern).postln;
+		parsed = input.findRegexp(inputPattern);
+		args = parsed[1..].collect(_[1]);
+		"PARSEDARGS % %".format(parsed, args).postln;
+
+		if(args.wrapAt(-1) == "") { args = args[..(args.size-2)] }; // remove empty arg at the end
+
+		if(rewriteFunc.notNil) {// use custom rewrite function
+			result = rewriteFunc.(input, args);
+		} { // else use rewrite pattern placeholders
+			result = rewritePattern;
+			placeholders = rewritePattern.findRegexp("#[0-9]#").collect(_[0]); // positions of placeholders
+			placeholders.size.do {|i|
+				var val;
+				val = args[i] ? "nil";
+				result = result.replace("#%#".format(i+1), val);
+			};
+		};
+		^result;
 	}
 
 	*newFromXMLElement {|elm|
-		var mname, maction, mrewrite, meval;
-		mname = elm.getAttribute("name");
-		meval = elm.getAttribute("evalString");
+		var thename, theinputpat, repat, refunc, theaction;
+		thename = elm.getAttribute("name");
+		theinputpat = elm.getAttribute("inputPattern");
 
-		mrewrite = elm.getElement("rewrite");
-		if(mrewrite.getFirstChild.notNil)
-		{ mrewrite = mrewrite.getFirstChild.getText }
-		{ mrewrite = nil };
+		repat = elm.getElement("rewritePattern");
+		"rewritePattern %".format(repat).postln;
+		if(repat.notNil.and({repat.getFirstChild.notNil}))
+		{ repat = repat.getFirstChild.getText }
+		{ repat = nil };
 
-		maction = elm.getElement("action");
-		if(maction.getFirstChild.notNil)
-		{ maction = maction.getFirstChild.getText }
-		{ maction = nil };
+		refunc = elm.getElement("rewriteFunc");
 
-		^this.new(mname, maction, mrewrite, meval);
+		if(refunc.notNil.and({refunc.getFirstChild.notNil}))
+		{ refunc = refunc.getFirstChild.getText.compile.value }
+		{ refunc = nil };
+
+		theaction = elm.getElement("action");
+		"action %".format(theaction).postln;
+
+
+		if(theaction.notNil.and({theaction.getFirstChild.notNil}))
+		{ theaction = theaction.getFirstChild.getText.compile.value }
+		{ theaction = nil };
+
+		^this.new(thename, theinputpat, repat ? refunc, theaction);
 	}
 
 	/*
@@ -346,14 +426,18 @@ Macro {
 		var mac, act, rewrt, txt;
 		mac = owner.createElement("macro");
 		mac.setAttribute("name", this.name.asString);
-		mac.setAttribute("evalString", this.evalString);
+		mac.setAttribute("inputPattern", this.inputPattern);
 		parent.appendChild(mac);
 		rewrt = owner.createElement("rewrite");
-		rewrt.appendChild(owner.createTextNode(this.rewrite));
-		mac.appendChild(rewrt);
-		act = owner.createElement("action");
-		act.appendChild(owner.createTextNode(this.action.cs));
-		mac.appendChild(act);
+		if(this.rewrite.notNil) {
+			rewrt.appendChild(owner.createTextNode(this.rewrite));
+			mac.appendChild(rewrt);
+		};
+		if(this.action.notNil) {
+			act = owner.createElement("action");
+			act.appendChild(owner.createTextNode(this.action.cs));
+			mac.appendChild(act);
+		};
 		^mac;
 	}
 }

@@ -1,5 +1,6 @@
 /*_____________________________________________________________
-Synthe.sc
+Syn.sc
+A compact synthdef manager
 
 Copyright (C) 2018 Jonathan Reus
 http://jonathanreus.com
@@ -198,10 +199,21 @@ Syn {
 				var idx, d = Document.open(s_info.filePath);
 			};
 
-			btn = subStyler.getSizableButton(subView, key, size: 100@lineheight);
+			btn = subStyler.getSizableButton(subView, key.asString, size: 100@lineheight);
 			btn.action = { |btn|
 				Synth(key);
 			};
+
+			btn = subStyler.getSizableButton(subView, "insert", size: 100@lineheight);
+			btn.action = { |btn|
+				"Insert for %".format(key).postln;
+			};
+
+			btn = subStyler.getSizableButton(subView, "pattern", size: 100@lineheight);
+			btn.action = { |btn|
+				"Pattern for %".format(key).postln;
+			};
+
 
 			txt = subStyler.getTextEdit(subView, width@400);
 			File.readAllString(s_info.filePath).split($@).do {|chunk,i|

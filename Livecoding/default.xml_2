@@ -1,0 +1,57 @@
+<?xml version="1.0" ?>
+<xml>
+    <macro name="pdef" evalString="">
+        <rewrite>
+            Pdef('p01').play(quant: 1);
+            Pdef('p01').stop;
+            (
+            Pdef('p01', Pbind(*[
+            instrument: 'default',
+            degree: Pseq([0,2,4,6,8],inf),
+            dur: 1,
+            amp: 1.0,
+            pan: 0,
+            out: 0
+            ]
+            ));
+            );
+        </rewrite>
+    </macro>
+    <macro name="mix" evalString="">
+        <rewrite>
+            (
+            Ndef('mix', {arg master=1.0;
+            var mix;
+            var in1,in2,in3,in4,in5,in6,in7,in8,in9;
+            in1 = In.ar(10, 2); in2 = In.ar(20, 2); in3 = In.ar(30, 2); in4 = In.ar(40, 2); in5 = In.ar(50, 2);
+            in6 = In.ar(60, 2); in7 = In.ar(70, 2); in8 = In.ar(80, 2); in9 = In.ar(90, 2);
+            mix = Mix([in1,in2,in3,in4,in5]);
+            mix = Limiter.ar(mix, 0.999, 0.001);
+            mix = LeakDC.ar(mix);
+            Out.ar(0, mix * master);
+            }).play;
+            );
+        </rewrite>
+    </macro>
+    <macro name="boot" evalString="">
+        <rewrite>
+            (
+            s.options.numInputBusChannels = 10; s.options.numOutputBusChannels = 10;
+            s.options.memSize = 65536; s.options.blockSize = 256;
+            s.waitForBoot { Syn.load };
+            );
+        </rewrite>
+        <action>{ ServerOptions.devices.postln }</action>
+    </macro>
+    <macro name="ndef" evalString="">
+        <rewrite>
+            (
+            Ndef('xxx', {arg amp=1.0, pan=0, out=10;
+            var sig;
+            sig = SinOsc.ar();
+            Out.ar(10, Pan2.ar(sig, pan, amp));
+            }).play;
+            );
+        </rewrite>
+    </macro>
+</xml>

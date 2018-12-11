@@ -2,17 +2,17 @@
 <!-- Default SC Macros -->
 <xml>
 
-<macro name="boot" evalString="">
-<rewrite>(
+<macro name="boot" inputPattern="boot">
+<rewritePattern>(
 s.options.numInputBusChannels = 10; s.options.numOutputBusChannels = 10;
 s.options.memSize = 65536; s.options.blockSize = 256;
 s.waitForBoot { Syn.load };
-);</rewrite>
+);</rewritePattern>
 <action>{ ServerOptions.devices.postln }</action>
 </macro>
 
-<macro name="pdef" evalString="">
-<rewrite>Pdef('p01').play(quant: 1);
+<macro name="pdef" inputPattern="pdef">
+<rewritePattern>Pdef('p01').play(quant: 1);
 Pdef('p01').stop;
 (
 Pdef('p01', Pbind(*[
@@ -24,23 +24,23 @@ Pdef('p01', Pbind(*[
     out: 0
 ]
 ));
-);</rewrite>
+);</rewritePattern>
 <action></action>
 </macro>
 
-<macro name="ndef" evalString="">
-<rewrite>(
+<macro name="ndef" inputPattern="ndef">
+<rewritePattern>(
 Ndef('xxx', {arg amp=1.0, pan=0, out=10;
     var sig;
     sig = SinOsc.ar();
     Out.ar(10, Pan2.ar(sig, pan, amp));
 }).play;
-);</rewrite>
+);</rewritePattern>
 <action></action>
 </macro>
 
-<macro name="mix" evalString="">
-<rewrite>(
+<macro name="mix" inputPattern="mix">
+<rewritePattern>(
 Ndef('mix', {arg master=1.0;
     var mix;
     var in1,in2,in3,in4,in5,in6,in7,in8,in9;
@@ -51,13 +51,16 @@ Ndef('mix', {arg master=1.0;
     mix = LeakDC.ar(mix);
     Out.ar(0, mix * master);
 }).play;
-);</rewrite>
+);</rewritePattern>
 <action></action>
 </macro>
 
+<macro name="s" inputPattern="s/([A-Za-z0-9_]+)" type="rewrite">
+<rewritePattern>Synth('#1#')</rewritePattern>
+<action></action>
+</macro>
 
 </xml>
-
 
 
 <!--
