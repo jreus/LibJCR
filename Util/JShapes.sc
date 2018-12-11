@@ -11,6 +11,7 @@ Envelopes, Scales, Gestures, Waveshaping Functions and other Shaping Utilities
 	}
 }
 
+
 + Scale {
 	// Put custom scales here that should be loaded at startup
 	*loadCustom {
@@ -18,34 +19,37 @@ Envelopes, Scales, Gestures, Waveshaping Functions and other Shaping Utilities
 	}
 
 	/*
-
-// INTEGRATE THIS INTO THE RATIOS2 FUNCTION!
-	// 12 octaves worth of ratios > midpoint?
-y = Array.fill(Scale.major.stepsPerOctave * 6, {arg i;
-	Scale.major.degreeToRatio(i, 0);
-});
-
-// split at the 3rd octave?
-m = 8*3;
-
-z = y[..m];
-l = y[(m+1)..];
-
-z = (z.ratiomidi.round - 12).midiratio
-l = (l.ratiomidi.round - 12).midiratio
- */
-
-	/*
 	@returns an array of ratios of given length from a specific start point and step size.
+
+	@usage
+	r = Scale.major.ratios2(0,10,3);
+	Pbind(*[freq:Pseq(120*r),dur:0.1,amp:0.1]).play;
+	r = Scale.iraq.ratios2(-10,12,1);
+	Pbind(*[freq:Pseq(1220*r),dur:0.1,amp:0.1]).play;
+	r = Scale.partch_u6.ratios2(-3,10,1);
+	Pbind(*[freq:Pseq(220*r),dur:0.1,amp:0.1]).play;
+
 	*/
-	ratios2 {arg start=0, length=7, step=1;
-		//degrees.collect(tuning.wrapAt(_)); // this is what's in the semitones method / calculation of semitones...
-		//^this.semitones.midiratio // standard return for ratio, converts an interval in semitones into a ratio
-		^degrees.collect(tuning.wrapAt(_));
+	ratios2 {arg start=0, len=7, step=1;
+		var startoct, endoct, sc, end, octrange, degrees, zeroidx;
+		var stpos,endpos;
+		degrees = [];
+		sc = this;
+		startoct = ceil(start.abs / sc.degrees.size) * start.sign;
+		end = start+(len*step);
+		endoct = ceil(end.abs / sc.degrees.size) * end.sign;
+		octrange = (startoct..endoct);
+		zeroidx = octrange.indexIn(0) * sc.degrees.size;
+		(startoct..endoct).do{|i| degrees = degrees ++ (sc.degrees + (sc.tuning.size * i)) };
+		stpos = (zeroidx + start).asInt;
+		endpos = (stpos + (len*step)).asInt - 1;
+		degrees = degrees.copySeries(stpos, stpos+1, endpos).select({|it,i| i % step == 0; });
+		^degrees.midiratio;
 	}
 }
 
-// Waveshaping functions
+
+// Waveshaping functions (add to MathLib?)
 + UGen {
 
 	step {

@@ -115,6 +115,32 @@ Color.white
 ********************************/
 
 
+/***************************************
+Neural Network (multilayer)
+****************************************/
+// See: http://www.wildml.com/2015/09/implementing-a-neural-network-from-scratch/
+
+(
+n = ();
+n.softmax = {|e,vec|
+	var expvec = vec.exp;
+	expvec / expvec.sum;
+};
+);
+
+n.softmax([1,2,3,4]);
+
+~graph = Cgraph.new(2, 1, \sigmoid); // size of input & output layer & output layer activation
+~graph.addHiddenLayer(3, \sigmoid); // add 3-node hidden layer with given activation function
+
+
+
+
+/***************************************
+END Neural Network (multilayer)
+****************************************/
+
+
 
 /*
 Quarks.install("https://github.com/ambisonictoolkit/PointView")

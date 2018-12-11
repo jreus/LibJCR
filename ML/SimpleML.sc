@@ -110,7 +110,7 @@ adapted from: https://machinelearningmastery.com/implement-perceptron-algorithm-
 and: http://www.jeannicholashould.com/what-i-learned-implementing-a-classifier-from-scratch.html
 
 */
-SimpleLinearClassifier {
+Perceptron {
 	var <>activationFunc;
 	var <>weights, <>bias;
 	var <>callback;
@@ -142,28 +142,32 @@ SimpleLinearClassifier {
 	}
 
 	/*
-	@return [slope,intercept] of the decision boundary
+	@param x1 dimension 1 [0 indexed]
+	@param x2 dimension 2 [0 indexed]
+	@return [slope,intercept] of the decision boundary line
 	*/
-	decisionBoundary {
+	decisionBoundary {|x1=0,x2=1|
 		var slope,intercept;
-		slope = (weights[0] / weights[1]).neg;
-		intercept = (bias / weights[1]).neg;
+		slope = (weights[x1] / weights[x2]).neg;
+		intercept = (bias / weights[x2]).neg;
 		^[slope, intercept];
 	}
 
 	/*
 	Use stochastic gradient descent to train a basic perceptron classifier
-	Data should be normalized before calling this function...
+	DATA MUST BE NORMALIZED BEFORE CALLING THIS FUNCTION!
 	@input training_dataset  Training dataset examples are pairs [[in1, in2, in3...],[...],..]
 	@input training_labels   These are the output labels [1,0,0,0,1, ...]
 	@input step_size  Step size/Learning rate, scaling factor step size in gradient decent whereby each weight is corrected each epoch
 	@input num_epochs  Number of epochs to train
+	@input temporal_expansion a delay time between callbacks
+	@callback_interval run the callback every callback_interval epochs
 	*/
-	train {arg train_data, train_labels, num_epochs, step_size, temporal_expansion=0.01;
+	train {arg train_data, train_labels, num_epochs, step_size, temporal_expansion=0.01, callback_interval=10;
 		var trainfunc;
 		if(training.notNil) { training.stop };
 		trainfunc = {
-			var numsamples, errors, predictions, normalized_data, meanSquareError;
+			var numsamples, errors, predictions, meanSquareError;
 			if(train_data.size != train_labels.size) { "Training Data Mismatch".throw };
 			numsamples = train_data.size;
 			predictions = Array.newClear(numsamples);
@@ -171,6 +175,8 @@ SimpleLinearClassifier {
 			if(train_data[0].isArray.not) { // convert to 1d vectors if necessary
 				train_data = train_data.collect {|item| [item] };
 			};
+
+			"DO I MAKE IT THIS FAR?".postln;
 
 			num_epochs.do {|epoch|
 				numsamples.do {|i|
@@ -186,9 +192,11 @@ SimpleLinearClassifier {
 					bias = bias + (step_size * errors[i]);
 				};
 
+				"EPOCH %".format(epoch).postln;
+
 				if(epoch % 10 == 0) {
 					"Epoch: %, MSE: %".format(epoch, meanSquareError).postln;
-					if(callback.notNil) { callback.(this, meanSquareError) };
+					if(callback.notNil) { callback.(this, meanSquareError, epoch) };
 					if(temporal_expansion != 0) { temporal_expansion.wait };
 				};
 			};
@@ -202,6 +210,21 @@ SimpleLinearClassifier {
 	resume { if(training.notNil) { training.resume } }
 
 }
+
+
+
+// See: https://towardsdatascience.com/how-to-build-your-own-neural-network-from-scratch-in-python-68998a08e4f6
+Cgraph {
+	var <layers; // array of arrays, each with multiple Cnodes
+	var <weights;
+
+}
+
+Cnode {
+	var <>activationFunc;
+}
+
+
 
 
 /*

@@ -16,9 +16,7 @@ The existance of the pattern value is duration-based. And will hold the final va
 Uses control rate.
 
 */
-
-
-Penv2 {
+PenvProxy {
 	*new { arg levels, times, curves, levelScale=1, levelBias=0, timeScale=1;
 		var env = Env(levels, times, curves);
 		var proxy = NodeProxy.new;

@@ -12,6 +12,7 @@ TODO:
 * add auto-numbering of patterns, synthdefs, etc..
 * add in-code macros for flow signal / multigesture/envelope drawing/random envelope system
 * add code that automatically runs to macros
+* add replace-with-side-effects possibility
 
 *******************************************/
 
@@ -28,55 +29,91 @@ Macro.active = false;
 ********************************/
 
 
-Macro {
+Macros {
 	classvar isActive;
-	classvar <rewrites, <funcs; // rewrite text and functions for each macro
-	classvar <f_addmac;
+	classvar <dict; // global dictionary of Macros by name
+	classvar <byEvalString; // dictionary of Macros by eval string
 	classvar <preProcessorFuncs; // Add additional preprocessor functions on top of the Macros system
 	// this is useful when you want to add additional SC preprocessor work without overwriting the macro system
 	classvar <>parseStr;
 
 	*initClass {
 		parseStr = ">>";
-		rewrites = Dictionary.new;
-		funcs = Dictionary.new;
+		dict = Dictionary.new;
+		byEvalString = Dictionary.new;
 		preProcessorFuncs = List.new;
-		f_addmac = {arg key, rewrite=nil, func=nil;
-			// command key, rewrite text, and function to evaluate upon replacing text in the editor
-			this.rewrites.put(key, rewrite);
-			this.funcs.put(key, func);
+	}
+
+	*load {|filePath|
+		var xml;
+		//this.addDefaultMacros();
+		if(filePath.isNil) {
+			filePath = "".resolveRelative +/+ "default.xml";
 		};
-		this.initMacros();
+
+		xml = DOMDocument.new(filePath).getElementsByTagName("xml").pop;
+		xml.getElementsByTagName("macro").do {|elm,i| // add new macros from xml file
+			var func, rewrite, mac;
+			mac = Macro.newFromXMLElement(elm);
+			dict.put(mac.name, mac);
+			byEvalString.put(mac.evalString, mac);
+		};
+
 		this.active_(true);
 	}
 
-	*initMacros {
-		f_addmac.('boot',
+
+	// write macros as an XML file
+	*export {|filePath|
+		var doc, xml, macro, func, rewrite, txt;
+
+		if(filePath.isNil) {
+			filePath = "".resolveRelative +/+ "default.xml";
+			while (File.exists(filePath)) {
+				filePath = filePath ++ "_2";
+			};
+		};
+
+		doc = DOMDocument.new;
+		doc.appendChild(doc.createProcessingInstruction("xml", "version=\"1.0\""));
+		xml = doc.createElement("xml");
+		doc.appendChild(xml);
+
+		"EXPORTING AS XML...".postln;
+
+		// for each macro: write macro element to the DOM
+		this.dict.keysValuesDo {|key, val, i| val.writeXMLElement(doc, xml) };
+
+		"WRITING TO FILE...".postln;
+		File.use(filePath, "w", {|fp| doc.write(fp) });
+	}
+
+	*addDefaultMacros {
+		this.add('boot',
 "(
-//s.options.device = \"EDIROL FA-101 (3797)\";
-//s.options.device = \"USBMixer\";
-//s.options.outDevice = \"Soundflower (64ch)\";
-//s.options.inDevice = \"EDIROL FA-101 (3797)\";
-//s.options.device = \"Fireface UCX (23590637)\";
-s.options.numInputBusChannels = 10;
-s.options.numOutputBusChannels = 10;
-s.options.memSize = 8192 * 2 * 2 * 2;
-s.waitForBoot {
-};
+s.options.numInputBusChannels = 10; s.options.numOutputBusChannels = 10;
+s.options.memSize = 65536; s.options.blockSize = 256;
+s.waitForBoot { Syn.load };
 );",
 			{
 				ServerOptions.devices.postln;
 			}
 		);
-		f_addmac.('reaper',
+		this.add('reaper',
 "
 ~scRPP = \"\".resolveRelative +/+ \"SuperCollider-Live.RPP\";
 (\"open -a Reaper64\"+~scRPP).runInTerminal;
+(
+s.options.outDevice = \"Soundflower (64ch)\";
+s.options.numInputBusChannels = 10; s.options.numOutputBusChannels = 10;
+s.options.memSize = 8192 * 2 * 2 * 2; s.options.blockSize = 64 * 2 * 2 * 2;
+s.waitForBoot { };
+);
 "
 		);
 
 
-		f_addmac.('mix',
+		this.add('mix',
 "(
 Ndef('mix', {arg master=1.0;
 \tvar mix;
@@ -90,8 +127,8 @@ Ndef('mix', {arg master=1.0;
 }).play;
 );"
 		);
-		f_addmac.('setmix',"Ndef('mix').set('master', 0.0);");
-		f_addmac.('pat',
+		this.add('setmix',"Ndef('mix').set('master', 0.0);");
+		this.add('pat',
 "
 Pdef('p01').play(quant: 1);
 Pdef('p01').stop;
@@ -107,7 +144,7 @@ Pdef('p01', Pbind(*[
 ));
 );"
 		);
-		f_addmac.('pmono',
+		this.add('pmono',
 "
 Pdef('p01').play(quant: 1);
 Pdef('p01').stop;
@@ -123,7 +160,7 @@ Pdef('p01', Pmono(*[
 ));
 );"
 		);
-		f_addmac.('sdef',
+		this.add('sdef',
 "(
 SynthDef('xxx', {arg out, amp=1.0, pan=0, freq=440, gate=1, atk=0.1, dec=0.1, sus=0.8, rel=0.1;
 	var sig, env;
@@ -134,7 +171,7 @@ SynthDef('xxx', {arg out, amp=1.0, pan=0, freq=440, gate=1, atk=0.1, dec=0.1, su
 }).add;
 );"
 		);
-		f_addmac.('ndef',
+		this.add('ndef',
 "(
 Ndef('xxx', {arg amp=1.0, pan=0, out=10;
 	var sig;
@@ -143,7 +180,7 @@ Ndef('xxx', {arg amp=1.0, pan=0, out=10;
 }).play;
 );"
 		);
-		f_addmac.value('play',
+		this.add('play',
 "(
 {
 	Out.ar(0, SinOsc.ar(1400) * EnvGen.ar(Env.perc, timeScale: 0.1, doneAction: 2));
@@ -151,13 +188,13 @@ Ndef('xxx', {arg amp=1.0, pan=0, out=10;
 );
 "
 		);
-		f_addmac.value('eq4',
+		this.add('eq4',
 "
 sig = BLowShelf.ar(BPeakEQ.ar(BPeakEQ.ar(BHiShelf.ar(sig, 10000, 1, 0), 4000, 1, 0), 1200, 1, 0), 200, 1, 0);
 "
 		);
 
-		f_addmac.value('start',nil,{arg line;
+		this.add('start',nil,{arg line;
 	var opts,serv;
 	serv = Server.default; opts = serv.options;
 	opts.numInputBusChannels = 10; opts.numOutputBusChannels = 10;
@@ -181,22 +218,33 @@ sig = BLowShelf.ar(BPeakEQ.ar(BPeakEQ.ar(BHiShelf.ar(sig, 10000, 1, 0), 4000, 1,
 	// Evaluate any macros on the given line number
 	*evalLine {arg ln;
 		var doc,line,pslen,command;
-		var snippet,func;
+		var mac,rewrite,action;
 		doc = Document.current;
 		line = doc.getLine(ln);
 		pslen = this.parseStr.size();
 		if((pslen==0) || line[0..(pslen-1)] == this.parseStr) { // limit to parse string
 			command = line[pslen..].asSymbol;
-			snippet = this.rewrites.at(command);
-			func = this.funcs.at(command);
-			if(snippet.notNil) {
-				doc.replaceLine(ln, snippet);
+			mac = dict[command];
+			rewrite = mac.rewrite;
+			action = mac.action;
+			if(rewrite.notNil) {
+				doc.replaceLine(ln, rewrite);
 			};
-			if(func.notNil) {
-				func.value(line);
+			if(action.notNil) {
+				action.(line);
 			};
 		};
+	}
 
+	// Evaluate the string as if it were a macro
+	*eval {arg string;
+		var rewrite, action, name, mac;
+		name = string.asSymbol;
+		mac = dict[name];
+		rewrite = mac.rewrite;
+		action = mac.action;
+		if(action.notNil) { action.(string) };
+		^rewrite;
 	}
 
 
@@ -206,8 +254,9 @@ sig = BLowShelf.ar(BPeakEQ.ar(BPeakEQ.ar(BHiShelf.ar(sig, 10000, 1, 0), 4000, 1,
 			prefunc = {|code, interpreter|
 				var psLen = this.parseStr.size();
 				if((psLen==0) || code[0..(psLen-1)] == this.parseStr) {
-					var doc, pos, snippet, cmd, linestart, func;
+					var doc, pos, mac, rewrite, action, name, linestart;
 					var myscript = code[psLen..];
+					name = myscript;
 					doc = Document.current;
 					pos = doc.selectionStart; // this is where the code was run
 					linestart = pos - 1;
@@ -218,16 +267,16 @@ sig = BLowShelf.ar(BPeakEQ.ar(BPeakEQ.ar(BHiShelf.ar(sig, 10000, 1, 0), 4000, 1,
 					};
 					linestart = linestart + 1;
 
-					snippet = this.rewrites.at(myscript.asSymbol);
-					func = this.funcs.at(myscript.asSymbol);
-					if(snippet.notNil) {
-						snippet = this.rewrites[myscript.asSymbol];
-						doc.string_(snippet, linestart, code.size);
+					mac = this.dict.at(name);
+					rewrite = mac.rewrite;
+					action = mac.action;
+					if(rewrite.notNil) {
+						doc.string_(rewrite, linestart, code.size);
 						code = nil; // only return nil if all the commands evaluated successfully
 					};
-					if(func.notNil) {
-						func.value;
-						if(snippet.isNil) { // if there is no rewrite then evaluate after the script command
+					if(action.notNil) {
+						action.value;
+						if(rewrite.isNil) { // if there is no rewrite then evaluate after the command
 							var scriptlen = myscript.size() + psLen;
 							code = code[scriptlen..];
 						};
@@ -246,27 +295,70 @@ sig = BLowShelf.ar(BPeakEQ.ar(BPeakEQ.ar(BHiShelf.ar(sig, 10000, 1, 0), 4000, 1,
 		};
 		thisProcess.interpreter.preProcessor = prefunc;
 		isActive = val;
+		if(isActive) {  this.postMacros } { "Macros disabled".postln };
 		^this;
 	}
 
+	*listMacros { ^this.dict.keys }
 
-	// Loads macros from a given file. If no file is provided then the Default Macro set is loaded.
-	*loadMacros {|filepath|
-		// TODO
-	}
+	*postMacros { "Active Macros: ".post; this.listMacros.do {|m| (" "+m).post}; "".postln }
 
-	// Saves current macros to a file
-	*saveMacros {|filepath|
-		// TODO
-	}
 
 	// Register a new macro.
-	*addMacro {|key, rewrite=nil, func=nil|
-		f_addmac.value(key, rewrite, func);
+	*add {|name, evalString=nil, rewrite=nil, action=nil|
+		var newmac = Macro(name,evalString, rewrite, action);
+		this.dict.put(name, newmac);
+		this.byEvalString.put(evalString, newmac);
+		^newmac;
+	}
+}
+
+Macro {
+	var <name, <>evalString, <>rewrite, <>action;
+
+	*new {|name, evalString, rewrite, action|
+		^super.newCopyArgs(name, evalString, rewrite, action);
 	}
 
+	*newFromXMLElement {|elm|
+		var mname, maction, mrewrite, meval;
+		mname = elm.getAttribute("name");
+		meval = elm.getAttribute("evalString");
 
+		mrewrite = elm.getElement("rewrite");
+		if(mrewrite.getFirstChild.notNil)
+		{ mrewrite = mrewrite.getFirstChild.getText }
+		{ mrewrite = nil };
+
+		maction = elm.getElement("action");
+		if(maction.getFirstChild.notNil)
+		{ maction = maction.getFirstChild.getText }
+		{ maction = nil };
+
+		^this.new(mname, maction, mrewrite, meval);
+	}
+
+	/*
+	@param owner An instance of DOMDocument
+	@param parent The parent node for the element being created, should be DOMNode
+	*/
+	writeXMLElement {|owner, parent|
+		var mac, act, rewrt, txt;
+		mac = owner.createElement("macro");
+		mac.setAttribute("name", this.name.asString);
+		mac.setAttribute("evalString", this.evalString);
+		parent.appendChild(mac);
+		rewrt = owner.createElement("rewrite");
+		rewrt.appendChild(owner.createTextNode(this.rewrite));
+		mac.appendChild(rewrt);
+		act = owner.createElement("action");
+		act.appendChild(owner.createTextNode(this.action.cs));
+		mac.appendChild(act);
+		^mac;
+	}
 }
+
+
 
 
 /***

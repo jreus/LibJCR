@@ -29,28 +29,31 @@ inside a provided library path.
 
 @usage
 
-x = Synthe.load();
+x = Syn.load();
 x.gui;
 */
-Synthe {
+Syn {
 	classvar <synthdefs, <>path, <synthsFolderPath, <synthsFullPath, <fileNames;
 	classvar <guiWindow;
 	classvar <allNames, <allTypes;
 
-	*load { | synthDefsPath |
+	*load { | synthDefsPath, server |
 		var sp;
 		if (synthDefsPath.isNil) {
 			path = 	"~/../Drive/DEV/SC_Synthesis/".asAbsolutePath; // put your synthdef library path here
 		} {
 			path = synthDefsPath;
 		};
+		if(server.isNil) { server = Server.default };
 		fileNames = List();
 		allNames = List();
 		allTypes = List();
 		synthdefs = Dictionary.new; // add synthdefs hashed on name
 		synthsFolderPath = path +/+ "SynthDefs";
 		synthsFullPath = ( synthsFolderPath +/+ "*").pathMatch;
-		synthsFullPath.do{|filepath| // Parse each synth file...
+
+		/*** PARSE SYNTH LIBRARY FILES ***/
+		synthsFullPath.do{|filepath|
 			var kw1,kw2,kw3; // keyword locations
 			var fulltext,tmp1,tmp2;
 			fulltext = File.readAllString(filepath);
@@ -94,6 +97,9 @@ Synthe {
 		};
 		allTypes = allTypes.asList.sort;
 		allNames = allNames.sort;
+
+		"... Parsed Synth Library ...".postln;
+		/*** END PARSE SYNTH LIBRARY FILES ***/
 	}
 
 	// Opens a window to navigate synths and file locations of synth definitions.
@@ -176,7 +182,9 @@ Synthe {
 		searchList.action_({ |sbs| // action when selecting items in the search list
 			var key, s_info, btn, txt, extext, synthdef = sbs.items[sbs.value];
 			synthdef.postln;
-			Synth(synthdef); // Play the synth with default values.
+
+			(instrument: synthdef, out: 0).play; // Play the synth with default values.
+
 			subView.removeAll; // remove subViews
 			subView.decorator = FlowLayout(subView.bounds);
 
