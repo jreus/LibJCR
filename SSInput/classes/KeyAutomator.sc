@@ -1,13 +1,12 @@
-/***********************************************
+/*********************************
 
 A Keypress macro recorder & player.
 Relies on Keyboard for server-side keystate listening.
 Will overwrite any keylogging function used in Keyboard.
 
-Jonathan Brodsky-Reus
-Aug 2016
+(C) 2016 Jonathan Reus / GPLv3
 
-USAGE:
+@usage
 
 k = KeyAutomator.new; // will boot the server & activate Keyboard listener if not already done
 k.ignoreKeys = [Keyboard.getKeycode('up'), Keyboard.getKeycode('down'), Keyboard.getKeycode('left'), Keyboard.getKeycode('right') ];
@@ -22,14 +21,8 @@ m.loop = true; // loop the macro
 Info on Key Automation in AppleScript
 http://apple.stackexchange.com/questions/36943/how-do-i-automate-a-key-press-in-applescript
 
-**********************************************/
+**********************************/
 
-
-
-
-
-/*********************************************************************************************
-*********************************************************************************************/
 KeyAutomator {
 	var <macros;
 	var <>ignoreKeys;
@@ -123,14 +116,14 @@ KeyAutomator {
 }
 
 
-/*********************************************************************************************
-KeyMacro - the workhorse of KeyAutomator
+/*
+KeyMacro
+The workhorse of KeyAutomator.
 Responsible for recording macros and playing them back.
 
 Info on Key Automation in AppleScript
 http://apple.stackexchange.com/questions/36943/how-do-i-automate-a-key-press-in-applescript
-
-*********************************************************************************************/
+*/
 KeyMacro {
 	var <isRecording;
 	var <keyEvents;

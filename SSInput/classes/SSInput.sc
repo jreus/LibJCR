@@ -1,22 +1,24 @@
 /***********************************************
+Server-side keyboard and mouse input hooks into the language. Allows keylistening and mouse listening OS-wide, even when SuperCollider is not the active application.
 
-Server-side keyboard and mouse input hooks into the language.
-Allows keylistening and mouse listening OS-wide, even when SuperCollider is not the key application.
-
-Jonathan Brodsky-Reus Apr 2015
-
+(C) 2015 Jonathan Reus / GPLv3
 
 **********************************************/
 
 
 
-/*********************************************************************************************
-Keyboard - A keylistener that responds OS-wide, even when SuperCollider is not the key application.
+/*
+SSKey
+A keylistener that responds OS-wide, even when SuperCollider is not the key application.
 The key listener won't respond to key combinations.. eg. shift, cmd, alt, ctrl are ignored.
-*********************************************************************************************/
-Keyboard {
-	// OSX keycodes and abbreviations
-	classvar <keycodes;
+
+@usage
+
+
+*/
+SSKey {
+	// OSX keysByCode and abbreviations
+	classvar <keysByCode;
 	classvar singleton;
 	var <callbacks, <callbacks_up, <callbacks_down, <callback_keylogger;
 	var <keysynths, <oscresponder, <responderKey;
@@ -26,15 +28,18 @@ Keyboard {
 
 
 	*enable {|serv|
-		Keyboard.getSingleton(serv).enable;
+		SSKey.getSingleton(serv).enable;
 	}
 
 	*disable {
-		Keyboard.getSingleton().disable;
+		SSKey.getSingleton().disable;
 	}
 
-	initme {|serv|
-		Keyboard.initKeycodes;
+	*initClass {
+		SSKey.initKeycodes;
+	}
+
+	init {|serv|
 		callbacks = ();
 		callbacks_up = ();
 		callbacks_down = ();
@@ -50,9 +55,9 @@ Keyboard {
 	*getSingleton {|serv=nil|
 		if(singleton.isNil) {
 			serv = serv ? Server.default;
-			singleton = super.new.initme(serv);
+			singleton = super.new.init(serv);
 			CmdPeriod.add({
-				Keyboard.disable;
+				SSKey.disable;
 			});
 			singleton.enable();
 		};
@@ -60,24 +65,24 @@ Keyboard {
 	}
 
 	*addKeyResponder {|keysymbol, cb_func|
-		Keyboard.getSingleton().addKeyResponder(keysymbol,cb_func);
+		SSKey.getSingleton().addKeyResponder(keysymbol,cb_func);
 	}
 
 
 	*doForKey {|keysymbol, state, function|
-		Keyboard.getSingleton().doForKey(keysymbol, state, function);
+		SSKey.getSingleton().doForKey(keysymbol, state, function);
 	}
 
 	*enableKeylogger {|keylog_func=nil|
-		Keyboard.getSingleton().enableKeylogger(keylog_func);
+		SSKey.getSingleton().enableKeylogger(keylog_func);
 	}
 
 	*disableKeylogger {
-		Keyboard.getSingleton().disableKeylogger;
+		SSKey.getSingleton().disableKeylogger;
 	}
 
 	*setVerbose {|val|
-		Keyboard.getSingleton().verbose = val;
+		SSKey.getSingleton().verbose = val;
 	}
 
 
@@ -105,7 +110,7 @@ Keyboard {
 
 
 	doForKey {|keysymbol, state, function|
-		Keyboard.addKeyResponder(keysymbol, {|val, symb, indx|
+		SSKey.addKeyResponder(keysymbol, {|val, symb, indx|
 			if (val == 1) {
 				if(callbacks_down[symb].isNil) {
 					if(verbose) {
@@ -136,7 +141,7 @@ Keyboard {
 	}
 
 
-	/* keysymbol - a valid symbol representing a key in keycodes
+	/* keysymbol - a valid symbol representing a key in keysByCode
 	cb_func - a callback to perform when the given key is pressed/released, cb_func expects 1 argument, the key up/down value
 	EX:
 	{|val| if (val == 1) {"Key is down".postln;} {"Key is up".postln;}; }
@@ -144,11 +149,11 @@ Keyboard {
 	addKeyResponder {|keysymbol, cb_func|
 
 		("Add responder for "++keysymbol).postln;
-		if (keycodes.findKeyForValue(keysymbol).isNil) {
+		if (keysByCode.findKeyForValue(keysymbol).isNil) {
 			Error("Key symbol"+keysymbol+" not valid").throw;
 		};
 
-		("Found key for value: "+keycodes.findKeyForValue(keysymbol)).postln;
+		("Found key for value: "+keysByCode.findKeyForValue(keysymbol)).postln;
 		callbacks.isNil && {callbacks = ()};
 		callbacks.put(keysymbol,cb_func);
 
@@ -164,7 +169,7 @@ Keyboard {
 			// SC 3.5 has the Changed UGEN, here we use HPZ2 to detect keystate changes
 			// NTS:: Look into how HPZ2 is working on the scope/plotter - I think it's causing double signals.
 			Server.default.waitForBoot {
-				keysynths = keycodes.collect{|key, code|
+				keysynths = keysByCode.collect{|key, code|
 					{
 						var t_state = KeyState.kr(code,-1,1,lag:0);
 						var hpz2 = HPZ2.kr(t_state);
@@ -175,12 +180,12 @@ Keyboard {
 				};
 
 				// OSCFunc available only in SC 3.5
-				//oscresponder = OSCFunc({|msg| (" "+ msg + "  " + ~keycodes[msg[2]]).postln; d[l[msg[2]]].value(msg[3].asInteger)}, \tr);
+				//oscresponder = OSCFunc({|msg| (" "+ msg + "  " + ~keysByCode[msg[2]]).postln; d[l[msg[2]]].value(msg[3].asInteger)}, \tr);
 
 				// Here's the 3.4.4 compatible version
 				oscresponder = OSCresponder(nil, responderKey, {|t, r, msg|
 					var keysymbol, now, lastpressed, indx = msg[3].asInteger, state = msg[4].asInteger;
-					keysymbol = keycodes[indx];
+					keysymbol = keysByCode[indx];
 					now = Process.elapsedTime;
 					lastpressed = key_lastpressed[keysymbol] ? (now - debounce_time - 1);
 					if((now - lastpressed) > debounce_time) {
@@ -189,7 +194,7 @@ Keyboard {
 						};
 						if(callbacks[keysymbol].isNil) {
 							if(verbose) {
-								("No response for key " ++ indx ++ " // " ++ keycodes[indx]).postln;
+								("No response for key " ++ indx ++ " // " ++ keysByCode[indx]).postln;
 							};
 						} {
 							callbacks[keysymbol].value(state, keysymbol, indx);
@@ -215,15 +220,18 @@ Keyboard {
 		"Keyboard disabled".postln;
 	}
 
-	*listKeycodes {
-		Keyboard.initKeycodes;
-		^keycodes;
+	*codesByKey {
+		var cbk = Dictionary.new;
+		keysByCode.keysValuesDo {|key,val|
+			cbk.put(val, key);
+		};
+		^cbk;
 	}
 
 	*getKeycode {|keysymbol|
 		var val;
-		Keyboard.initKeycodes;
-		val = keycodes.findKeyForValue(keysymbol);
+		SSKey.initKeycodes;
+		val = keysByCode.findKeyForValue(keysymbol);
 		if (val.isNil) {
 			Error("Key symbol"+keysymbol+" not valid").throw;
 		};
@@ -232,8 +240,8 @@ Keyboard {
 
 	// http://macbiblioblog.blogspot.nl/2014/12/key-codes-for-function-and-special-keys.html
 	*initKeycodes {
-		keycodes ?? {
-			keycodes = (
+		keysByCode ?? {
+			keysByCode = (
 				10:'sectionsign',
 				18:'1',
 				19:'2',
@@ -318,45 +326,46 @@ Keyboard {
 
 			);
 		};
-		^keycodes;
+		^keysByCode;
 	}
 
 }
 
 
 /*********************************************************************************************
-SSMouseInput - A mouse input listener that responds OS-wide, even when SuperCollider is not the key application.
+SSMouse
+A mouse input listener that responds OS-wide, even when SuperCollider is not the key application.
 *********************************************************************************************/
-SSMouseInput {
+SSMouse {
 	classvar singleton;
 	var callbacks,listenersynth,oscresponder,responderKey;
 
 
 	*enable {
-		SSMouseInput.getSingleton().enable;
+		SSMouse.getSingleton().enable;
 	}
 
 	*disable {
-		SSMouseInput.getSingleton().disable;
+		SSMouse.getSingleton().disable;
 	}
 
 	initme {|server|
 		this.initCallbacks;
-		responderKey = ("/ssmouseinput" ++ rrand(1,32000)).asSymbol;
+		responderKey = ("/SSMouse" ++ rrand(1,32000)).asSymbol;
 	}
 
 	*getSingleton {
 		if(singleton.isNil) {
 			singleton = super.new.initme(Server.default);
 			CmdPeriod.add({
-				SSMouseInput.disable;
+				SSMouse.disable;
 			});
 		};
 		^singleton;
 	}
 
 	*addMouseResponder {|mouseaction, cb_func|
-		SSMouseInput.getSingleton().addMouseResponder(mouseaction,cb_func);
+		SSMouse.getSingleton().addMouseResponder(mouseaction,cb_func);
 	}
 
 	/* mouseaction - a valid symbol representing a mouse function (movex, movey, button)
@@ -409,7 +418,7 @@ SSMouseInput {
 
 			}).add;
 
-			"SSMouseInput enabled".postln;
+			"SSMouse enabled".postln;
 		};
 	}
 
@@ -420,7 +429,7 @@ SSMouseInput {
 		listenersynth.free;
 		oscresponder.remove;
 		listenersynth = oscresponder = nil;
-		"SSMouseInput disabled".postln;
+		"SSMouse disabled".postln;
 	}
 
 	initCallbacks {
