@@ -123,7 +123,7 @@ Perceptron {
 	init {arg numinputs, afunc;
 		activationFunc = ActivationFunction.new(\step);
 		weights = 1.0.dup(numinputs); // initialize weights to 1
-		bias = 0.0;
+		bias = 0.0; // initialize bias to 0
 	}
 
 
@@ -156,10 +156,10 @@ Perceptron {
 	/*
 	Use stochastic gradient descent to train a basic perceptron classifier
 	DATA MUST BE NORMALIZED BEFORE CALLING THIS FUNCTION!
-	@input training_dataset  Training dataset examples are pairs [[in1, in2, in3...],[...],..]
-	@input training_labels   These are the output labels [1,0,0,0,1, ...]
-	@input step_size  Step size/Learning rate, scaling factor step size in gradient decent whereby each weight is corrected each epoch
+	@input training_datas  Training dataset matrix, examples are rows [[in1, in2, in3...],[...],..]
+	@input train_labels   These are the output labels [1,0,0,0,1, ...]
 	@input num_epochs  Number of epochs to train
+	@input step_size  Step size/Learning rate, scaling factor step size in gradient decent whereby each weight is corrected each epoch
 	@input temporal_expansion a delay time between callbacks
 	@callback_interval run the callback every callback_interval epochs
 	*/
@@ -176,13 +176,11 @@ Perceptron {
 				train_data = train_data.collect {|item| [item] };
 			};
 
-			"DO I MAKE IT THIS FAR?".postln;
-
 			num_epochs.do {|epoch|
 				numsamples.do {|i|
 					predictions[i] = this.classify(train_data[i]);
 				};
-				errors = (train_labels - predictions);
+				errors = (train_labels - predictions); // NTS: this calculation of error is dependent on the two classes being 1 or 0!
 				meanSquareError = (errors**2).sum / numsamples;
 
 				train_data.do {|inputvec, i|
@@ -192,7 +190,7 @@ Perceptron {
 					bias = bias + (step_size * errors[i]);
 				};
 
-				"EPOCH %".format(epoch).postln;
+				//"EPOCH %".format(epoch).postln;
 
 				if(epoch % 10 == 0) {
 					"Epoch: %, MSE: %".format(epoch, meanSquareError).postln;
