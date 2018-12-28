@@ -168,7 +168,7 @@ JLog {
 	}
 
 	// postln
-	p { ^this.post; }
+	p { ^this.postln; }
 }
 
 + Symbol {

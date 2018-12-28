@@ -2,8 +2,6 @@
 Granular Synthesis Instruments
 (c) 2018 Jonathan Reus
 
-
-
 */
 
 /*
