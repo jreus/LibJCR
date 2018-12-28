@@ -3,7 +3,7 @@ SampleLib.sc
 
 Sample library manager and buffer utilities
 
-Copyright (C) 2018 Jonathan Reus
+(C) 2018 Jonathan Reus / GPLv3
 http://jonathanreus.com
 
 This program is free software: you can redistribute it and/or modify
@@ -15,68 +15,121 @@ but WITHOUT ANY WARRANTY; without even the implied warranty of
 MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
-along with this program.  If not, see <http://www.gnu.org/licenses/>.
+along with this program.  If not, see http://www.gnu.org/licenses/
 
 ________________________________________________________________*/
 
 
 
 
-/*
-
+/******************************************************************
 
 @usage
-b = SampleLib.load(s); // load sample library metadata from disk
+SampleLib.load(); // loads global & local sample libraries
 
-b["drum001"]; // lazy load samples into buffers as needed and access them like so, with various pattern matching options
-// e.g. by type, by directory..
+SampleLib.at("drum001"); // get sample by id, or search library by various functions
+// e.g. by type, by directory, etc..
 
-// or like this..
-b.drum001
+SampleLib.gui; // open gui editor
 
+*******************************************************************/
 
-********************************/
-SampleLib[] {
-	var <samples; // all available sample files by unique id
-	var <samplesByGroup; // available sample files, by group name
+SampleLib {
+	classvar <samples; // all available sample files by id
+	classvar <samplesByGroup; // available sample files, by group name
+	classvar <globalSamplesPath; // global samples directory
+	classvar <localSamplesPath; // local samples directory
 
-	var <activeServer; // server where buffers are allocated and loaded, should be set on load
+	classvar <activeServer; // server where buffers are allocated and loaded, should be set on load
 
-	var <window; // gui for navigating sample library
+	classvar <win; // gui for navigating sample library
 
 	// boolean toggles lazyloading of samples, false by default. If true will save some ram by only loading samples when necessary
 	// However, keep in mind that samples are loaded into buffers on the server asynchronously from other language instructions,
 	// and thus you must be wary of performing operations on buffer variables still holding nil.
-	var <lazyLoad;
+	classvar <lazyLoadGlobal=true, <lazyLoadLocal=false;
 
 	*initClass {
-	}
-
-	*new {arg lazyload=false;
-		^super.new.init(lazyload);
-	}
-
-
-	init {arg lazyload;
-		lazyLoad = lazyload;
 		samples = Dictionary.new;
 		samplesByGroup = Dictionary.new;
+		globalSamplesPath = "~/_samples".absolutePath;
 	}
 
 
-
-	// Returns the buffer for a given file. If the file is not loaded into a buffer on the server, it will be.
-	// This is called when using the slot operator
-	at {arg key;
-		// Should load the buffer automatically if it isn't...
-		var sample, result = nil;
-
+	// private method
+	*pr_checkServerAlive {|inactiveFunc|
 		if(this.activeServer.serverRunning.not) {
-			error("No Running Server to Allocate Buffers: Boot the Server First!");
-			^nil;
+			error("Cannot Allocate Buffers: Boot the Server First!");
+			inactiveFunc.value;
 		};
+	}
 
-		sample = samples[key];
+	// By default will look for a local 'samples' directory in the same directory as the current document.
+	// A global samples directory will be searched for at globalSamplesPath
+	// If a server is not provided, server will be the default server.
+	*load {|server=nil,localsampledir=nil,lazyload=false|
+		var samplePath;
+
+		if(server.isNil) { server = Server.default };
+		activeServer = server;
+		this.pr_checkServerAlive({^nil});
+
+		if(localsampledir.isNil) { localsampledir = Document.current.dir +/+ "_samples" };
+		localSamplesPath = localsampledir;
+		if(File.exists(localSamplesPath).not) { File.mkdir(localSamplesPath) };
+		if(File.exists(globalSamplesPath).not) { File.mkdir(globalSamplesPath) };
+
+		activeServer = server;
+
+		// Load samples from global & local paths
+		"Loading Global Samples ... %".format(globalSamplesPath).postln;
+		samplePath = PathName.new(globalSamplesPath);
+		this.pr_loadSamples(samplePath, lazyLoadGlobal);
+		"Loading Local Samples ... %".format(localSamplesPath).postln;
+		samplePath = PathName.new(localSamplesPath);
+		this.pr_loadSamples(samplePath, lazyLoadLocal);
+	}
+
+	// private method
+	*pr_loadSamples {|samplePath, lazyLoad|
+		samplePath.filesDo {arg path;
+			var md; // metamd
+			var id, group, groupId;
+			md = SampleFile.openRead(path);
+			if(md.notNil && md.isSoundFile) {
+				"... %".format(md.path).postln;
+				//[md.duration, md.headerFormat, md.sampleFormat, md.numFrames, md.numChannels, md.sampleRate, path.folderName, path.extension, path.fileName, md.path].postln;
+
+				id = path.fileNameWithoutExtension.replace(" ","");
+				samples.put(id, md);
+				groupId = path.folderName.asSymbol;
+				group = samplesByGroup.at(groupId);
+				if(group.isNil) { // new group
+					group = Dictionary.new;
+					samplesByGroup.put(groupId, group);
+				};
+				group.put(id, md);
+
+				if(lazyLoad == false) { // if lazyload not active, go ahead and load everything
+					md.loadFileIntoBuffer(activeServer);
+				};
+
+			};
+		};
+	}
+
+	// When lazyloading is active, preload lets you preload groups of samples
+	*preload {
+		/*** STUB ***/
+	}
+
+	// Returns the SampleFile for a given id
+	// If the file is not loaded into a buffer, this method will cause it to be so
+	*at {|id|
+		var sample, result = nil;
+		pr_checkServerAlive({^nil});
+
+		sample = this.samples[id];
 		if(sample.notNil) {
 			var tmp;
 			tmp = sample.buffer;
@@ -90,97 +143,48 @@ SampleLib[] {
 	}
 
 
-	// By default will look for a 'samples' directory in the same directory as the current document.
-	// If a server is not provided, server will be the default server.
-	*load {|server=nil,filepath=nil,lazyload=false|
-		var newsnd;
-		if(server.isNil) {
-			server = Server.default;
-		};
-		if(filepath.isNil) {
-			filepath = Document.current.dir +/+ "samples";
-		};
-		newsnd = SampleLib.new(lazyload).load(filepath,server);
-		^newsnd;
-	}
+	*gui {
+		var styler, subStyler, decorator, childView, childDecorator;
+		var searchText, searchList, findFunc;
+		var gui_width=250;
 
-	load {|sampleLibraryPath,server|
-		var sampledir = PathName.new(sampleLibraryPath);
-		activeServer = server;
-		"Loading Samples from %".format(sampleLibraryPath).postln;
-		sampledir.filesDo {arg path;
-			var data, key, group, tmp;
-			var groupname;
-			data = SampleFile.openRead(path);
-			if(data.notNil && data.isSoundFile) {
-				[data.duration, data.headerFormat, data.sampleFormat, data.numFrames, data.numChannels, data.sampleRate, path.folderName, path.extension, path.fileName, data.path].postln;
+		if(win.notNil) { win.close };
+		win = Window("Sample Lib", gui_width@800);
+		styler = GUIStyler(win); // initialize with master win
+		win.view.decorator = FlowLayout(win.view.bounds);
+		decorator = win.view.decorator;
+		decorator.margin = Point(0,0);
 
+		// Child win
+		win.view.bounds.postln;
+		childView = styler.getWindow("SubView", win.view.bounds, scroll: true);
+		childView.decorator = FlowLayout(childView.bounds);
+		childDecorator = decorator;
 
-				key = path.fileNameWithoutExtension.replace(" ","");
-				samples.put(key, data);
+		styler.getSizableText(childView, "SAMPLES3", gui_width, \center, 12);
 
+		// Search
+		styler.getSizableText(childView, "search", 90, \left, 10);
 
-				groupname = path.folderName.asSymbol;
-				group = samplesByGroup.at(tmp);
-				if(group.isNil) {
-					group = Dictionary.new;
-					samplesByGroup.put(groupname, group);
-				};
-				group.put(key, data);
+		searchText = TextField(childView, gui_width@20);
 
-				if(lazyLoad == false) {
-					data.loadFileIntoBuffer(activeServer);
-				};
+		searchList = ListView(childView, gui_width@100)
+		.items_(samples.keys.asArray)
+		.stringColor_(Color.white)
+		.background_(Color.clear)
+		.hiliteColor_(Color.new(0.3765, 0.5922, 1.0000, 0.5));
 
+		samples.values.sort({|a,b| a.name < b.name}).do{|samp|
+			var subView;
+			styler.getSizableText(childView, samp.asString.toUpper, gui_width - 100, \left, 10);
+			styler.getSizableButton(childView, "prev", size: 50@20)
+			.action = {|btn|
+				"Playing %: % % %".format(samp, samp.numChannels, samp.sampleRate, samp.duration).postln;
+				samp.play();
 			};
 		};
-
+		win.front;
 	}
-
-	gui {
-		if(window.isNil) {
-			var styler, subStyler, decorator, childView, childDecorator;
-			var searchText, searchList, findFunc;
-			var gui_width=250;
-			window = Window("Samples", gui_width@800);
-			styler = GUIStyler(window); // initialize with master window
-			window.view.decorator = FlowLayout(window.view.bounds);
-			decorator = window.view.decorator;
-			decorator.margin = Point(0,0);
-
-			// Child window
-			window.view.bounds.postln;
-			childView = styler.getWindow("Samples2", window.view.bounds, scroll: true);
-			childView.decorator = FlowLayout(childView.bounds);
-			childDecorator = decorator;
-
-			styler.getSizableText(childView, "SAMPLES3", gui_width, \center, 12);
-
-			// Search
-			styler.getSizableText(childView, "search", 90, \left, 10);
-
-			searchText = TextField(childView, gui_width@20);
-
-			searchList = ListView(childView, gui_width@100)
-			.items_(samples.keys.asArray)
-			.stringColor_(Color.white)
-			.background_(Color.clear)
-			.hiliteColor_(Color.new(0.3765, 0.5922, 1.0000, 0.5));
-
-			samples.values.sort({|a,b| a.name < b.name}).do{|samp|
-				var subView;
-				styler.getSizableText(childView, samp.asString.toUpper, gui_width - 100, \left, 10);
-				styler.getSizableButton(childView, "prev", size: 50@20)
-				.action = {|btn|
-					"Playing %: % % %".format(samp, samp.numChannels, samp.sampleRate, samp.duration).postln;
-					samp.play();
-				};
-			};
-		};
-		window.front;
-
-	}
-
 }
 
 
@@ -192,10 +196,11 @@ SampleFile : SoundFile {
 	var <genre;     // european, house, techno, folk, etc...
 	var <source;    // voice, strings, pad, mono-synth, etc...
 
-	// maybe fancier analysis-related things? Could also be generated and stored in metadata files.
+	// maybe fancier analysis-related things? Could also be generated and stored in meta-data files.
 	var frequency_profile;
 	var average_tempo;
 	var average_pitch;
+	var markers; // time marker points
 
 	/*
 	@Override
@@ -204,6 +209,16 @@ SampleFile : SoundFile {
 	*openRead {arg path;
 		^super.new.init(path);
 	}
+
+	// MAYBE, need to overwrite openRead to add loading of metamd or analysis
+	/*
+	*openRead { arg pathName;
+	var file;
+	file = SoundFile(pathName);
+	if(file.openRead(pathName)) { ^file } { ^nil }
+	}
+	*/
+
 
 	init {arg path;
 		this.openRead(path.asAbsolutePath);
@@ -261,16 +276,6 @@ SampleFile : SoundFile {
 		};
 
 	}
-
-	// MAYBE, need to overwrite openRead to add loading of metadata or analysis
-	/*
-	*openRead { arg pathName;
-		var file;
-		file = SoundFile(pathName);
-		if(file.openRead(pathName)) { ^file } { ^nil }
-	}
-	*/
-
 
 }
 
