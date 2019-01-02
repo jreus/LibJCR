@@ -1,23 +1,22 @@
 # Global Macros
 boot: 
- inputPattern: "boot/([0-9]+)"
  rewritePattern: "(
 
-s.options.numInputBusChannels = 2; s.options.numOutputBusChannels = 2; s.options.memSize = 65536; s.options.blockSize = 256; s.options.numWireBufs = 512;
+s.options.numInputBusChannels = @1@; s.options.numOutputBusChannels = @1@; s.options.memSize = 65536; s.options.blockSize = 256; s.options.numWireBufs = 512;
 
-s.waitForBoot {
-	Syn.load;
-	if(m.notNil) { m.window.close }; m = s.meter; m.window.alwaysOnTop=true; m.window.front; b = m.window.bounds;
-	l = Window.screenBounds.width - b.width; m.window.bounds = Rect(l, 0, b.width, b.height);
- };
+s.waitForBoot { if(m.notNil) { m.window.close }; m = s.meter; m.window.alwaysOnTop=true; m.window.front; b = m.window.bounds; l = Window.screenBounds.width - b.width; m.window.bounds = Rect(l, 0, b.width, b.height);
+ Syn.load;
+};
 
 );"
  actionFunc: '{ ServerOptions.devices.postln }'
+ inputPattern: "boot/([0-9]+)"
+ type: "rewrite"
 syn: 
- inputPattern: "syn/([A-Za-z0-9_]+)"
  rewritePattern: "Synth(\\@1@)"
+ inputPattern: "syn/([A-Za-z0-9_]+)"
+ type: "command"
 ndef: 
- inputPattern: "ndef"
  rewriteFunc: '{|input,args|
 					if(~nMacroNdefs.notNil) { ~nMacroNdefs = ~nMacroNdefs + 1 } { ~nMacroNdefs = 0 };
 "(\n
@@ -28,3 +27,5 @@ Ndef(\\n%, {arg amp=1.0, pan=0;\n
 );\n
 Ndef(\\n%).play(out:0, numChannels: 1);\n".format(~nMacroNdefs, ~nMacroNdefs);
 			}'
+ inputPattern: "ndef"
+ type: "rewrite"

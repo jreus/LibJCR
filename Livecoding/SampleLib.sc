@@ -135,7 +135,7 @@ SampleLib {
 				//[md.duration, md.headerFormat, md.sampleFormat, md.numFrames, md.numChannels, md.sampleRate, path.folderName, path.extension, path.fileName, md.path].postln;
 
 				id = path.fileNameWithoutExtension.replace(" ","");
-				while {samples.at(id).notNil} { id = id ++ " *" };
+				while {samples.at(id).notNil} { id = id ++ "*" };
 				md.name = id;
 				samples.put(id, md);
 				groupId = path.folderName.asSymbol;

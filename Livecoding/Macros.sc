@@ -66,7 +66,7 @@ Macros {
 	classvar <names; // ordered list of Macro names
 	classvar <dict; // global dictionary of Macros by name
 	classvar <byInputPattern; // dictionary of Macros by eval string
-	classvar <preProcessorFuncs; // Add additional preprocessor functions on top of the Macros system
+	classvar <preProcessorFunc=nil; // Add additional preprocessor function on top of the Macros system
 	// this is useful when you want to add additional SC preprocessor work without overwriting the macro system
 	classvar <>parseStr;
   classvar <>verbose=true;
@@ -81,7 +81,6 @@ Macros {
 		names = List.new;
 		dict = Dictionary.new;
 		byInputPattern = Dictionary.new;
-		preProcessorFuncs = List.new;
 		globalMacroPath = "".resolveRelative +/+ "global_macros.yaml";
 	}
 
@@ -115,22 +114,13 @@ Macros {
 			};
 		};
 
-
-		/*
-		// old XML-based macro files
-		xml = DOMDocument.new(globalMacroPath).getElementsByTagName("xml").pop;
-		xml.getElementsByTagName("macro").do {|elm,i| // add new macros from xml file
-		var func, rewrite, mac;
-		mac = Macro.newFromXMLElement(elm);
-		dict.put(mac.name, mac);
-		names.add(mac.name);
-		byInputPattern.put(mac.inputPattern, mac);
-		};
-		*/
-
 		names.sort;
 		this.active_(true);
 	}
+
+  *at {|name| ^this.dict[name] }
+
+
 
 
 	*makeDefaultMacroFile {|filepath|
@@ -140,9 +130,10 @@ Macros {
 			fp.write("# Global Macros\n");
 			res = Dictionary.new;
 			res.put('boot', (
+        type: "rewrite",
 				inputPattern: "boot/([0-9]+)",
 				rewritePattern: "(\n
-s.options.numInputBusChannels = $$1$$; s.options.numOutputBusChannels = $$1$$; s.options.memSize = 65536; s.options.blockSize = 256; s.options.numWireBufs = 512;\n
+s.options.numInputBusChannels = @1@; s.options.numOutputBusChannels = @1@; s.options.memSize = 65536; s.options.blockSize = 256; s.options.numWireBufs = 512;\n
 s.waitForBoot { if(m.notNil) { m.window.close }; m = s.meter; m.window.alwaysOnTop=true; m.window.front; b = m.window.bounds; l = Window.screenBounds.width - b.width; m.window.bounds = Rect(l, 0, b.width, b.height);
  Syn.load;
 };\n
@@ -153,6 +144,7 @@ s.waitForBoot { if(m.notNil) { m.window.close }; m = s.meter; m.window.alwaysOnT
 			));
 
 			res.put('syn', (
+        type: "command",
 				inputPattern: "syn/([A-Za-z0-9_]+)",
 				rewritePattern: "Synth(\\@1@)",
 				rewriteFunc: nil,
@@ -160,6 +152,7 @@ s.waitForBoot { if(m.notNil) { m.window.close }; m = s.meter; m.window.alwaysOnT
 			));
 
 			res.put("ndef", (
+        type: "rewrite",
 				inputPattern: "ndef",
 				rewriteFunc: {|input,args|
 					if(~nMacroNdefs.notNil) { ~nMacroNdefs = ~nMacroNdefs + 1 } { ~nMacroNdefs = 0 };
@@ -216,6 +209,7 @@ Ndef(\\n%).play(out:0, numChannels: 1);\n".format(~nMacroNdefs, ~nMacroNdefs);
 	}
 
 
+  /* Deprecated...
 	*asXML {
 		var doc = DOMDocument.new, xml;
 		doc.appendChild(doc.createProcessingInstruction("xml", "version=\"1.0\""));
@@ -225,6 +219,7 @@ Ndef(\\n%).play(out:0, numChannels: 1);\n".format(~nMacroNdefs, ~nMacroNdefs);
 		this.dict.keysValuesDo {|key, val, i| val.writeXMLElement(doc, xml) };
 		^doc;
 	}
+  */
 
 	// export macros to xml file
 	*export {|filePath|
@@ -242,12 +237,12 @@ Ndef(\\n%).play(out:0, numChannels: 1);\n".format(~nMacroNdefs, ~nMacroNdefs);
 		File.use(filePath, "w", {|fp| doc.write(fp) });
 	}
 
-	*addPreProcessorFunc {arg newfunc;
-		preProcessorFuncs.add(newfunc);
+	addPreProcessorFunc {arg newfunc;
+		preProcessorFunc = newfunc;
 	}
 
-	*clearPreProcessorFuncs {
-		preProcessorFuncs = List.new;
+	*clearPreProcessorFunc {
+		preProcessorFunc = nil;
 	}
 
 	*active {
@@ -288,59 +283,81 @@ Ndef(\\n%).play(out:0, numChannels: 1);\n".format(~nMacroNdefs, ~nMacroNdefs);
 
 	*active_ {|val=true|
 		var prefunc = nil;
-		if(val == true) { // ***** PREPROCESSOR FUNCTION ******
+		if(val == true) { // ***** PREPROCESSOR PARSING FUNCTION ******
 			prefunc = {|code, interpreter|
-				var psLen = this.parseStr.size();
-
-				if((psLen==0) || code[0..(psLen-1)] == this.parseStr) {
-					var doc, pos, mac, rewrite, name, linestart;
-					var myscript = code[psLen..];
-					name = myscript;
-
+				var stidx, psLen = this.parseStr.size();
+        stidx = code.find(this.parseStr);
+        if(stidx.notNil) {
+					var doc, pos, mac, name, linestart;
+          var endidx, input;
+					//var myscript = code[psLen..]; // fetch the code
+          endidx = stidx + psLen;
+          // read in code until first encountered whitespace
+          while {(endidx < code.size).and({code[endidx].isSpace.not})} { endidx = endidx + 1 };
+          input = code[(stidx+psLen)..endidx];
+          name = input;
           mac = this.dict.at(name); // try to just match against macro name
-					if(mac.isNil) { // try to match against input pattern
-						var it=0, found=false, keyvals = byInputPattern.asAssociations;
+          if(mac.isNil) { // then try to match against input pattern (more work)
+						var kv, match, it=0, found=false, keyvals = byInputPattern.asAssociations;
 						while({found.not && (it < keyvals.size)}) {
-							var kv = keyvals[it];
-							if(kv.key.matchRegexp(myscript)) { mac = kv.value; found=true };
+							kv = keyvals[it];
+              match = kv.key.matchRegexp(input);
+              if(match) { mac = kv.value; found=true };
 							it = it+1;
 						};
 					};
 
 					if(mac.notNil) { // matched a macro
-						doc = Document.current;
-						pos = doc.selectionStart; // this is where the code was run
-						linestart = pos - 1;
+            var newcode, type;
+            var insertStart, insertSize, rewrite, actionFunc, args, matchSize;
+            type = mac.type;
+            #rewrite, matchSize, args = mac.rewrite(input, verbose);
 
-						while( {doc.getChar(linestart) != "\n"} )
-						{
-							linestart = linestart - 1;
-						};
-						linestart = linestart + 1;
 
-						rewrite = mac.rewrite(myscript, verbose);
-						if(rewrite.notNil) {
-							doc.string_(rewrite, linestart, code.size);
-							code = nil; // only return nil if all the commands evaluated successfully
-						} { // if there is no rewrite, then evaluate any SC code following the macro
-              var scriptlen = myscript.size() + psLen;
-							code = code[scriptlen..];
+            if(rewrite.isNil) {
+              type = \rewrite; newcode = code;
+            } {
+              newcode = code[..(stidx-1)] ++ rewrite ++ code[(endidx+1)..];
             };
-					} {// No Macro Matched
-						"Could not evaluate Macro %".format(myscript).error;
-					};
+
+            switch(mac.type,
+                \command, {
+                  // replace the command inside the code & execute the new code without rewriting...
+                  code = newcode;
+                },
+                \rewrite, {
+                  var doc = Document.current;
+                  insertStart = doc.selectionStart - 1;
+                  insertSize = doc.selectionSize;
+                  if(insertSize == 0) { // a line was evaluated, or a selection using parens
+                    // BUG: The parens case is very tricky and requires more complex parsing...
+                    // Here I only parse the single-line case..
+                  while { (insertStart >= 0).and({doc.getChar(insertStart).at(0) != $\n}) } { insertStart = insertStart-1 };
+                  insertStart = insertStart + 1;
+                  insertSize = code.size + 1;
+                  };
+
+                  doc.string_(newcode, insertStart, insertSize);
+                  code = nil; // don't evaluate anything further
+                },
+                { "Bad macro type %".format(mac.type).error; ^nil }
+              )
+          } {// if the macro is still nil, no macro was matched
+						"Could not evaluate Macro %".format(input).error;
+          };
 				};
 
-				if(preProcessorFuncs.size() > 0) {
-					// preprocess the code through additional preProcessor functions
-					preProcessorFuncs.do {arg pre;
-						code = pre.value(code, interpreter);
-					};
-
+				if(preProcessorFunc.notNil) {
+					// preprocess the code through additional preProcessor function
+						code = preProcessorFunc.value(code, interpreter);
 				};
-				code; // send the code through to SC without further preprocessing
+
+        //"EVALUATING:\n%".format(code).postln;
+				code; // send the code string through to SC for further interpreting
 			};
-		};
+		} {
+      // TODO: set the preProcessor to preProcessorFuncs when macros are disabled?
+    };
 		thisProcess.interpreter.preProcessor = prefunc;
 		isActive = val;
 		if(isActive) {  this.postMacros } { "Macros disabled".postln };
@@ -355,8 +372,8 @@ Ndef(\\n%).play(out:0, numChannels: 1);\n".format(~nMacroNdefs, ~nMacroNdefs);
 	Register a new macro
 	@param rewrite Either a rewrite pattern (String) or a custom rewrite function
 	*/
-	*new {|name, inputPattern=nil, rewrite=nil, action=nil|
-		var newmac = Macro(name,inputPattern, rewrite, action);
+	*new {|name, type=\command, inputPattern=nil, rewrite=nil, action=nil|
+		var newmac = Macro(name, type, inputPattern, rewrite, action);
 		this.addMacro(newmac);
 		^newmac;
 	}
@@ -372,15 +389,20 @@ Macro {
 	// A rewrite can be a simple string with placeholders (i.e. like String.format)
 	// or can be a function for complex translations from input code to rewritten code
 	var <name, <inputPattern, <rewritePattern, <rewriteFunc, <actionFunc;
+  var <type; // command or rewrite ...
+  // commands invisibly rewrite to executable code before evaluation
+  // rewrites replace the input code with another string
+  // both execute actionFunc as a side effect
 
 	*new {|name, inputPattern, rewrite, action|
 		^super.new.init(name, inputPattern, rewrite, action);
 	}
 
-	init {|nm, ip, rw, act|
+	init {|nm, typ, ip, rw, act|
 		name = nm;
 		inputPattern = ip;
 		actionFunc = act;
+    type = typ;
 		if(rw.class == Function) { rewriteFunc = rw } { rewritePattern = rw };
     if(nm.isKindOf(String).not) {
       "Macro name must be a string".error;
@@ -388,6 +410,7 @@ Macro {
     };
     ^this;
 	}
+
 
 	/*
 	Returns the rewrite string for a given input string
@@ -414,19 +437,20 @@ Macro {
 				result = result.replace("@%@".format(i+1), val);
 			};
 		};
-
     if(actionFunc.notNil) { actionFunc.value(input, args) };
-    if(verbose) { "%  % --> %".format(name, input, result).postln };
-		^result;
+
+    if(verbose) { "% %  % --> %".format(type, name, input, result).postln };
+    ^[result, args];
 	}
 
 	/*
 	Create new Macro from parsed YAML dictionary
 	*/
 	*newFromDict {|thename, dict|
-		var ipat, repat, refunc, act;
+		var ipat, typ, repat, refunc, act;
 
 		ipat = dict["inputPattern"];
+    typ = dict["type"].asSymbol;
 		repat = dict["rewritePattern"];
 		refunc = dict["rewriteFunc"];
 		act = dict["actionFunc"];
@@ -434,10 +458,12 @@ Macro {
 		if(refunc.notNil && (refunc != '')) { refunc = refunc.compile.value };
 		if(act.notNil && (act != '')) { act = act.compile.value };
 
-		^this.new(thename, ipat, repat ? refunc, act);
+		^this.new(thename, typ, ipat, repat ? refunc, act);
 	}
 
-	*newFromXMLElement {|elm|
+
+/* Deprecated...
+  *newFromXMLElement {|elm|
 		var thename, theinputpat, repat, refunc, theaction;
 		thename = elm.getAttribute("name");
 		theinputpat = elm.getAttribute("inputPattern");
@@ -486,6 +512,7 @@ Macro {
 		};
 		^mac;
 	}
+  */
 }
 
 
