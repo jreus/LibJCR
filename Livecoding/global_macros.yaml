@@ -1,0 +1,30 @@
+# Global Macros
+boot: 
+ inputPattern: "boot/([0-9]+)"
+ rewritePattern: "(
+
+s.options.numInputBusChannels = 2; s.options.numOutputBusChannels = 2; s.options.memSize = 65536; s.options.blockSize = 256; s.options.numWireBufs = 512;
+
+s.waitForBoot {
+	Syn.load;
+	if(m.notNil) { m.window.close }; m = s.meter; m.window.alwaysOnTop=true; m.window.front; b = m.window.bounds;
+	l = Window.screenBounds.width - b.width; m.window.bounds = Rect(l, 0, b.width, b.height);
+ };
+
+);"
+ actionFunc: '{ ServerOptions.devices.postln }'
+syn: 
+ inputPattern: "syn/([A-Za-z0-9_]+)"
+ rewritePattern: "Synth(\\@1@)"
+ndef: 
+ inputPattern: "ndef"
+ rewriteFunc: '{|input,args|
+					if(~nMacroNdefs.notNil) { ~nMacroNdefs = ~nMacroNdefs + 1 } { ~nMacroNdefs = 0 };
+"(\n
+Ndef(\\n%, {arg amp=1.0, pan=0;\n
+\tvar sig;\n
+\tsig = SinOsc.ar(440) * EnvGen.ar(Env.perc, Impulse.ar(1));\n
+});\n
+);\n
+Ndef(\\n%).play(out:0, numChannels: 1);\n".format(~nMacroNdefs, ~nMacroNdefs);
+			}'

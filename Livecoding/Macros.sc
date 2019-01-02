@@ -62,13 +62,14 @@ Macros.active_(false); // disable macros
 
 
 Macros {
-	classvar isActive;
+	classvar <isActive;
 	classvar <names; // ordered list of Macro names
 	classvar <dict; // global dictionary of Macros by name
 	classvar <byInputPattern; // dictionary of Macros by eval string
 	classvar <preProcessorFuncs; // Add additional preprocessor functions on top of the Macros system
 	// this is useful when you want to add additional SC preprocessor work without overwriting the macro system
 	classvar <>parseStr;
+  classvar <>verbose=true;
 
 	classvar <win;
 	classvar <macroPath, <defaultLocalMacroPath;
@@ -141,12 +142,10 @@ Macros {
 			res.put('boot', (
 				inputPattern: "boot/([0-9]+)",
 				rewritePattern: "(\n
-s.options.numInputBusChannels = 2; s.options.numOutputBusChannels = 2; s.options.memSize = 65536; s.options.blockSize = 256; s.options.numWireBufs = 512;\n
-s.waitForBoot {
-	Syn.load;
-	if(m.notNil) { m.window.close }; m = s.meter; m.window.alwaysOnTop=true; m.window.front; b = m.window.bounds;
-	l = Window.screenBounds.width - b.width; m.window.bounds = Rect(l, 0, b.width, b.height);
- };\n
+s.options.numInputBusChannels = $$1$$; s.options.numOutputBusChannels = $$1$$; s.options.memSize = 65536; s.options.blockSize = 256; s.options.numWireBufs = 512;\n
+s.waitForBoot { if(m.notNil) { m.window.close }; m = s.meter; m.window.alwaysOnTop=true; m.window.front; b = m.window.bounds; l = Window.screenBounds.width - b.width; m.window.bounds = Rect(l, 0, b.width, b.height);
+ Syn.load;
+};\n
 );",
 				rewriteFunc: nil,
 				actionFunc: { ServerOptions.devices.postln }
@@ -292,15 +291,15 @@ Ndef(\\n%).play(out:0, numChannels: 1);\n".format(~nMacroNdefs, ~nMacroNdefs);
 		if(val == true) { // ***** PREPROCESSOR FUNCTION ******
 			prefunc = {|code, interpreter|
 				var psLen = this.parseStr.size();
+
 				if((psLen==0) || code[0..(psLen-1)] == this.parseStr) {
-					var doc, pos, mac, rewrite, action, name, linestart;
+					var doc, pos, mac, rewrite, name, linestart;
 					var myscript = code[psLen..];
 					name = myscript;
-					"Parsing: %".format(myscript).postln;
-					mac = this.dict.at(name); // try to just match against macro name
+
+          mac = this.dict.at(name); // try to just match against macro name
 					if(mac.isNil) { // try to match against input pattern
 						var it=0, found=false, keyvals = byInputPattern.asAssociations;
-						keyvals.postln;
 						while({found.not && (it < keyvals.size)}) {
 							var kv = keyvals[it];
 							if(kv.key.matchRegexp(myscript)) { mac = kv.value; found=true };
@@ -319,21 +318,16 @@ Ndef(\\n%).play(out:0, numChannels: 1);\n".format(~nMacroNdefs, ~nMacroNdefs);
 						};
 						linestart = linestart + 1;
 
-						rewrite = mac.rewrite(myscript);
-						action = mac.actionFunc;
+						rewrite = mac.rewrite(myscript, verbose);
 						if(rewrite.notNil) {
 							doc.string_(rewrite, linestart, code.size);
 							code = nil; // only return nil if all the commands evaluated successfully
-						};
-						if(action.notNil) {
-							action.value;
-							if(rewrite.isNil) { // if there is no rewrite then evaluate after the command
-								var scriptlen = myscript.size() + psLen;
-								code = code[scriptlen..];
-							};
-						};
+						} { // if there is no rewrite, then evaluate any SC code following the macro
+              var scriptlen = myscript.size() + psLen;
+							code = code[scriptlen..];
+            };
 					} {// No Macro Matched
-						"Could not evaluate Macro %".format(myscript).postln;
+						"Could not evaluate Macro %".format(myscript).error;
 					};
 				};
 
@@ -388,26 +382,29 @@ Macro {
 		inputPattern = ip;
 		actionFunc = act;
 		if(rw.class == Function) { rewriteFunc = rw } { rewritePattern = rw };
+    if(nm.isKindOf(String).not) {
+      "Macro name must be a string".error;
+      ^nil;
+    };
+    ^this;
 	}
 
 	/*
 	Returns the rewrite string for a given input string
 	A rewrite pattern string uses argument placeholders: #1# #2# #3#
 	*/
-	rewrite {|input|
+	rewrite {|input, verbose=false|
 		var placeholders, result, args=[];
 		var parsed;
-		"REWRITING %: % %".format(name, input, inputPattern).postln;
 		parsed = input.findRegexp(inputPattern);
 		args = parsed[1..].collect(_[1]);
-		"PARSEDARGS % %".format(parsed, args).postln;
 
 		if(args.wrapAt(-1) == "") { args = args[..(args.size-2)] }; // remove empty arg at the end
 
 		if(rewriteFunc.notNil) {// use custom rewrite function
 			result = rewriteFunc.(input, args);
-			"USE REWRITEFUNC".postln;
-		} { // else use rewrite pattern placeholders
+		};
+    if(rewritePattern.notNil) { // else use rewrite pattern placeholders
 			result = rewritePattern;
 			placeholders = rewritePattern.findRegexp("@[0-9]+@").collect(_[0]); // positions of placeholders
 
@@ -417,6 +414,9 @@ Macro {
 				result = result.replace("@%@".format(i+1), val);
 			};
 		};
+
+    if(actionFunc.notNil) { actionFunc.value(input, args) };
+    if(verbose) { "%  % --> %".format(name, input, result).postln };
 		^result;
 	}
 
@@ -568,4 +568,8 @@ d.replaceLine(51, "d.cursorLine;");
 		var range = this.getLineRange(ln);
 		this.string_(newstring, range[0], range[2]);
 	}
+
+  insertAtCursor {arg string;
+    this.string_(string, this.selectionStart, 0);
+  }
 }

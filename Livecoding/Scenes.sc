@@ -6,6 +6,19 @@ GPL
 
 *******************************************/
 
+/*--------------------------------------
+Todo:
+>>> A hierarchical scene system for livecoding
+>> different layers, a "meta scene" that encompasses all scenes.. things like server booting and that kind of thing, or recordings... and sub-scenes for livecoding or interface designs
+>> be able to manage "template" files that are copied as instances
+>> use a macro or use a UI for navigation
+
+>^>^> what about file-based macros, to accompany XML-based macros?
+>>>> this would make transforming a quick piece of code into a macro much easier!
+>>> I could also consider using the Scene editor as an interface for editing & using macros..
+
+>> hmm, the question is for what purpose / why would I want heirarchies of scenes?
+--------------------------------------*/
 
 
 /*_____________________________________________________________
