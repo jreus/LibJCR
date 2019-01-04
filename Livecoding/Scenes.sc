@@ -1,5 +1,5 @@
 /******************************************
-Livecoding scenography
+Livecoding Scenography
 
 (C) 2018 Jonathan Reus
 GPL
@@ -29,7 +29,8 @@ A scene system for livecoding. Template files are stored in a
 that can be performed and modified at will without transforming the
 original.
 
-Works a bit like Macros but on the scale of sonic scenes.
+Works a bit like Macros but on the scale of files. Keeps track of all your
+instances within a performance concept.
 
 
 @usage
@@ -46,7 +47,7 @@ Scenes {
 	}
 
 	init {|scenedir|
-		if(scenedir.isNil) { scenedir = Document.current.path.dirname +/+ "scenes/" };
+		if(scenedir.isNil) { scenedir = Document.current.path.dirname +/+ "_scenes/" };
 		scenedir.postln;
 		scenePath = scenedir;
 		if(File.exists(scenePath).not) { File.mkdir(scenePath) };
@@ -57,13 +58,16 @@ Scenes {
 		if(File.exists(instancePath).not) { File.mkdir(instancePath) };
 	}
 
-	makeGui {
-		var width = 200, height = 600, lineheight=20;
+	makeGui {|position|
+		var width = 200, height = 600, lineheight=20, top=0, left=0;
 		var styler, decorator, childView;
 		var sceneList, sceneName, addBtn, deleteBtn;
 		var subView, subStyler;
 		if(win.notNil) { win.close };
-		win = Window("Scene Navigator", (width+10)@400);
+    if(position.notNil) {
+      top = position.y; left = position.x;
+    };
+    win = Window("Scene Navigator", Rect(left, top, (width+10), 400));
 		styler = GUIStyler(win);
 
 		// child view inside window, this is where all the gui views sit
@@ -88,6 +92,7 @@ Scenes {
 				"A scene with the name % already exists".format(newscene).warn;
 			} { // create a new scene
 				var scenepath = scenePath +/+ newscene ++ ".scd";
+        "new file at % % %".format(scenepath, newscene, sceneName.value).postln;
 				File.use(scenepath, "w", {|fp| fp.write("/* New Scene */") });
 				sceneList.items = sceneList.items.add(newscene);
 			};
@@ -115,54 +120,68 @@ Scenes {
 				"Abort".postln;
 				dialog.close;
 			});
-			dialog.front;
-
+      dialog.front;
 		};
 
 
 		subStyler = GUIStyler(childView); // styler for subwindow
 		subView = subStyler.getWindow("Subwindow", width@600); // subwindow
 
-		sceneList.action_({ |lv| // action when selecting items in the scene list -> either open a new instance, or the current instance
-			var btn;
-			var matching, scene, scenepath;
+		sceneList.action_({ |lv| // action when selecting items in the scene list -> build the scene info view
+			var btn, radio, createNewInstanceFunc;
+			var matching, scene, templatepath;
 			scene = lv.items[lv.value];
-			scenepath = scenePath +/+ scene ++ ".scd";
-
+			templatepath = scenePath +/+ scene ++ ".scd";
 			scene.postln;
-			sceneName.string = scene;
 
-			// Does an instance of the scene already exist?
-			matching = Document.openDocuments.select {|doc| doc.title.contains(scene) };
-
-			matching.postln;
-
-			matching.size.switch(
-				0, { // if no, create a new file/instance & open it
-					var original, instance;
-					instance = instancePath +/+ Date.getDate.stamp ++ "_" ++ scene ++ ".scd";
-					File.use(instance, "w", {|fp| fp.write(File.readAllString(scenepath)) });
-					Document.open(instance);
-				},
-				1, { // if yes, open that instance
-					Document.open(matching[0].path);
-				},
-				{ // otherwise you have multiple open instances
-					var im = matching.select {|doc| doc.title != (scene++".scd") };
-					Document.open(im[0].path);
-					"Multiple Matching Instances... ".postln;
-				}
-			);
-
-			// Show options for selected scene
-			subView.removeAll; // remove gui for previously selected scene
+      // *** BUILD SCENE INFO WINDOW ***
+      subView.removeAll; // remove views & layout for previous scene info window
 			subView.decorator = FlowLayout(subView.bounds);
-			btn = styler.getSizableButton(subView, "source", size: 50@lineheight);
-			btn.action = {|btn| Document.open(scenepath) };
+
+      createNewInstanceFunc = {
+        // Does an instance of the scene already exist?
+        matching = Document.openDocuments.select {|doc| doc.title.contains(scene) };
+        matching.postln;
+        matching.size.switch(
+          0, { // if no, create a new file/instance & open it
+            var original, instance;
+            instance = instancePath +/+ Date.getDate.stamp ++ "_" ++ scene ++ ".scd";
+            File.use(instance, "w", {|fp| fp.write(File.readAllString(templatepath)) });
+            Document.open(instance);
+          },
+          1, { // if yes, open that instance
+            Document.open(matching[0].path);
+          },
+          { // otherwise you have multiple open instances
+            var im = matching.select {|doc| doc.title != (scene++".scd") };
+            Document.open(im[0].path);
+            "Multiple Matching Instances... ".postln;
+          }
+        );
+      };
+
+			btn = styler.getSizableButton(subView, "open template", size: 80@lineheight);
+			btn.action = {|btn| Document.open(templatepath) };
+      btn = styler.getSizableButton(subView, "new instance", size: 80@lineheight);
+      btn.action = createNewInstanceFunc;
+
+      // Radiobuttons
+      // No Auto Loading
+      // Auto Load Latest Instance
+      // Auto Load New Instance (if latest is older than x days)
+      radio = RadioButton(subView);
+
+
+      // Instances List
+
+
+      // *** END SCENE INFO WINDOW ***
+
+
+
 		}); // END SCENELIST ACTION
 
-
-		win.front;
+    ^win.alwaysOnTop_(true).front;
 	}
 }
 

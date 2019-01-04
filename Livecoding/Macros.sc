@@ -89,7 +89,7 @@ Macros {
 	*load {|macrodir|
 		var xml, filenames, yaml;
 
-		if(macrodir.isNil) { macrodir = Document.current.path.dirname +/+ "macros/" };
+		if(macrodir.isNil) { macrodir = Document.current.path.dirname +/+ "_macros/" };
 		macroPath = macrodir;
 		defaultLocalMacroPath = macroPath +/+ "local_macros.yaml";
 

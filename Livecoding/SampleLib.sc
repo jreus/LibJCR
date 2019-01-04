@@ -86,13 +86,11 @@ SampleLib {
 		};
 	}
 
-	// By default will look for a local 'samples' directory in the same directory as the current document.
+	// By default will look for a local '_samples' directory in the same directory as the current document.
 	// A global samples directory will be searched for at globalSamplesPath
 	// If a server is not provided, server will be the default server.
 	*load {|server=nil,localsampledir=nil,verbose=false|
 		var samplePath;
-
-		if(server.isNil) { server = Server.default };
 		activeServer = server;
 		this.pr_checkServerAlive({^nil});
 
@@ -101,13 +99,11 @@ SampleLib {
 		if(File.exists(localSamplesPath).not) { File.mkdir(localSamplesPath) };
 		if(File.exists(globalSamplesPath).not) { File.mkdir(globalSamplesPath) };
 
-		activeServer = server;
-
 		// Load samples from global & local paths
-		if(verbose) { "Loading Global Samples ... %".format(globalSamplesPath).postln };
+		if(verbose) { "... Loading Global Samples ... %".format(globalSamplesPath).postln };
 		samplePath = PathName.new(globalSamplesPath);
 		this.pr_loadSamples(samplePath, lazyLoadGlobal, verbose);
-		if(verbose) { "Loading Local Samples ... %".format(localSamplesPath).postln };
+		if(verbose) { "... Loading Local Samples ... %".format(localSamplesPath).postln };
 		samplePath = PathName.new(localSamplesPath);
 		this.pr_loadSamples(samplePath, lazyLoadLocal, verbose);
 
@@ -122,6 +118,7 @@ SampleLib {
 
 		allGroups = allGroups.asList.sort;
 		allTags = allTags.asList.sort;
+    "... Finished Loading Samples ...".postln;
 	}
 
 	// private method
@@ -162,7 +159,7 @@ SampleLib {
 
 	// When lazyloading is active, preload lets you preload groups of samples
 	*preload {
-		/*** STUB ***/
+		/*** TODO: STUB ***/
 	}
 
 	// Returns the SampleFile for a given id
