@@ -167,8 +167,8 @@ JLog {
 		^this.notemidi;
 	}
 
-	// postln
-	p { ^this.postln; }
+	// postln with formatting
+  //postf {|...args| ^this.format(*args).postln; }
 }
 
 + Symbol {
