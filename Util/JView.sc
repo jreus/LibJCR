@@ -1,383 +1,134 @@
+/*****************************************
+(C) 2018 Jonathan Reus
 
-/**
-Jonathan Reus (c) 2018 GPL
+Various simple and useful view widgets.
 
-Based on ScatterView from the Math quark
-originally 2005 by Till Bovermann / Bielefeld university
+******************************************/
 
-**/
-
-/*
+/***
 @usage
 
-possibleMethods
-\fillRect, \fillOval, \strokeOval, \strokeRect, \lineTo
-
-~xdata = Array.series(20, 0, 1.0 / 20) + Array.fill(20, {rrand(-0.3, 0.3)});
-~ydata = Array.series(20, 0, 1.0 / 20) + Array.fill(20, {rrand(-0.3, 0.3)});
-
-b = Rect(0,0, 800, 600);
-w = Window.new(bounds: b);
-j = JScatterView.new(w, b, ~asPoints).drawAxis_(true).symbolColor_(Color.red).drawMethod_(\fillOval).symbolSize_(5@5);
-k = JScatterView.new(w, b, [[0,0],[1,1]]).background_(Color.clear).symbolColor_(Color.blue);
+// Using RadioButtons
+(
+w = Window.new("R", 200@100);
+r = RadioButton.new(w, Rect(100,0,100,100));
+t = StaticText(w, Rect(0,0,100,100)).string_("Option").background_(Color.gray(0.1)).stringColor_(Color.gray(0.9));
+r.action_({|rad, sel| [rad,sel].postln }).background_(Color.gray(0.1)).traceColor_(Color.gray(0.9));
+t.mouseUpAction = {|txt| r.setSelected(r.selected.not); txt.postln };
+w.alwaysOnTop_(true);
 w.front;
-
-// update the data
-k.data_([[0,0],[1,0.3]]).refresh();
+);
 
 
-// Some of the options of a scattergraph
-j.drawAxis_(true).xAxisName_("Inputs").yAxisName_("Outputs").refresh;
-j.drawValues_(true).refresh;
-j.drawValues_(false).symbolSize_(5@5).symbolColor_(Color.red).drawMethod_(\fillOval).refresh;
+// Using RadioSetView
+(
+w = Window.new("R", 100@100);
+r = RadioSetView.new(w, w.bounds);
+r.add("Opt1"); r.add("Opt2"); r.add("Opt3");
+r.action = {|sv, idx| [sv,idx].postln };
+w.alwaysOnTop_(true);
+w.front;
+);
+
+***/
+RadioSetView : CompositeView {
+  var <buttons, <>traceColor;
+  var <selectedIndex=nil;
+  var <>action;
+
+  *new {|parent, bounds|
+    ^super.new(parent,bounds).init;
+  }
+
+  init {
+    this.addFlowLayout;
+    buttons = List.new;
+    traceColor = Color.gray(0.9);
+    this.background = Color.gray(0.1);
+
+  }
+
+  setSelected {|newindex|
+    this.selectedIndex_(newindex);
+    buttons[newindex].setSelected(true);
+  }
+
+  selectedIndex_{|newindex|
+    if(newindex >= buttons.size) { "Index % exceeds number of radio buttons".format(newindex).error; ^nil };
+    selectedIndex = newindex;
+  }
+
+  add {|text|
+    var newbut, newtext;
+    // add layout here...
+    newtext = StaticText(this, 50@20).string_(text).stringColor_(this.traceColor);
+    newbut = RadioButton(this, 20@20).background_(this.background).traceColor_(this.traceColor);
+    newtext.mouseUpAction = {|txt| newbut.setSelected(newbut.selected.not) };
+    newbut.action = {|vw, sel|
+      this.buttons.do {|but, idx|
+        var txt=but[0], btn=but[1];
+        btn.value_(false);
+        if(vw == btn) { this.selectedIndex_(idx); if(this.action.notNil) {this.action.(this, idx)} };
+      };
+      vw.value_(true);
+    };
+    buttons.add([newtext, newbut]);
+  }
 
 
-
-*/
-
-
-JScatterView {
-	var <plot, <>background;
-	var <>highlightColor, <highlightItem, <>highlightSize, <>isHighlight, <>drawAxis, <>drawValues;
-	var <>xAxisName, <>yAxisName;
-	var <symbolSize, <>symbolColor, <>drawMethod = \lineTo;
-	var <adjustedData, <specX, <specY;
-
-	*new {|parent, bounds, data, specX, specY|
-		^super.new.initPlot(
-			parent, bounds, data, specX, specY
-		)
-	}
-
-	highlightItem_{|item|
-		highlightItem = item.isKindOf(Collection).if({item}, {[item]});
-		//this.plot.refresh;
-	}
-	highlightItemRel_{|val|
-		this.highlightItem = (val * (adjustedData.size-1)).asInteger;
-	}
-	highlightRange{|start, end|
-		this.highlightItem = (start .. end);
-	}
-	highlightRangeRel{|start, end|
-		var startIndex, endIndex;
-		startIndex = (start * (adjustedData.size-1)).asInteger;
-		endIndex = (end * (adjustedData.size-1)).asInteger;
-		this.highlightItem = (startIndex .. endIndex);
-	}
-	refresh {
-		plot.refresh;
-	}
-	data_{|data|
-		adjustedData = data.collect {|item|
-			[specX.unmap(item[0]), specY.unmap(item[1])];
-		};
-		highlightItem = min(highlightItem, (adjustedData.size-1));
-	}
-	symbolSize_{|point|
-		if(point.isKindOf(Point), {symbolSize = point}, {symbolSize = (point@point)});
-	}
-	resize{
-		^plot.resize;
-	}
-	resize_{arg resize;
-		plot.resize_(resize)
-	}
-	initPlot {arg parent, bounds, data, argSpecX, argSpecY;
-
-		var widthSpec, heightSpec, cross;
-		var possibleMethods;
-
-		specX = argSpecX ? [0,1].asSpec;
-		specY = argSpecY ? specX.copy;
-		possibleMethods = [\fillRect, \fillOval, \strokeOval, \strokeRect];
-
-		this.symbolSize = 1;
-		symbolColor = symbolColor ? Color.black;
-
-		background = Color.white;
-		highlightColor = Color.red;
-		highlightItem = 0;
-		highlightSize = (2@2);
-		isHighlight = false;
-		drawAxis = false;
-		drawValues = false;
-		xAxisName= "X";
-		yAxisName= "Y";
-
-		this.data_(data);
-
-		cross = {|rect, width, color|
-			var dx, dy, extX, extY;
-			dx = rect.left;
-			dy = rect.top;
-			extX = rect.width;
-			extY = rect.height;
-			Pen.use{
-				Pen.color = color;
-				Pen.translate(dx, dy);
-				Pen.moveTo((0)@(extY*0.5));
-				Pen.lineTo(extX@(extY*0.5));
-				Pen.moveTo((extX*0.5)@(0));
-				Pen.lineTo((extX*0.5)@(extY));
-				Pen.stroke;
-			};
-		};
-
-		plot = UserView.new(parent, bounds)
-			//.relativeOrigin_(false)
-			.drawFunc_({|w|
-				var width, height, rect, pad = 10;
-				if (drawAxis) { pad = 60 };
-
-				width =  w.bounds.width  - pad;
-				height = w.bounds.height - pad;
-
-				Pen.use{
-					// clipping into the boundingbox
-					Pen.moveTo((w.bounds.left)@(w.bounds.top));
-					Pen.lineTo(((w.bounds.left)@(w.bounds.top))
-							+ (w.bounds.width@0));
-					Pen.lineTo(((w.bounds.left)@(w.bounds.top))
-							+ (w.bounds.width@w.bounds.height));
-					Pen.lineTo(((w.bounds.left)@(w.bounds.top))
-							+ (0@w.bounds.height));
-					Pen.lineTo((w.bounds.left)@(w.bounds.top));
-					Pen.clip;
-
-					// draw Background
-					Pen.color = background;
-					Pen.addRect(w.bounds);
-					Pen.fill;
-
-					// draw data
-					Pen.color = symbolColor;
-					if (possibleMethods.includes(drawMethod), {
-						Pen.beginPath;
-						adjustedData.do{|item, i|
-							rect = Rect(
-								(   item[0]  * width)  - (symbolSize.x/2) + (pad/2),
-								((1-item[1]) * height) - (symbolSize.y/2) + (pad/2),
-								symbolSize.x, symbolSize.y
-							);
-							Pen.perform(
-								drawMethod,
-								(Rect(w.bounds.left, w.bounds.top, 0, 0) + rect)
-							);
-						}
-					},{ // else draw lines
-						Pen.width = symbolSize.x;
-						// move to first position;
-						if (adjustedData.notNil) {
-							Pen.moveTo(
-								((adjustedData[0][0]  * width) + (pad/2))
-								 @
-								 (((1-adjustedData[0][1]) * height) + (pad/2))
-							   	  +
-								  (w.bounds.left@w.bounds.top)
-							);
-						};
-						// draw lines
-						adjustedData.do{|item, i|
-							Pen.lineTo(
-								((item[0]  * width) + (pad/2))
-								 @
-								 (((1-item[1]) * height) + (pad/2))
-							 	  +
-							 	  (w.bounds.left@w.bounds.top)
-							)
-						};
-						if(drawMethod == \fill, {Pen.fill},{Pen.stroke});
-					});
-
-					// highlight datapoint
-					if(isHighlight) {
-						highlightItem.do{|item|
-							cross.value((Rect(
-								(adjustedData[item][0]  * width)
-								 -
-								 (highlightSize.x/2) + (pad/2),
-								((1-adjustedData[item][1]) * height)
-								 -
-								 (highlightSize.y/2)
-								  +
-								  (pad/2),
-								highlightSize.x, highlightSize.y)
-								  +
-								  Rect(w.bounds.left, w.bounds.top, 0, 0)),
-								symbolSize,
-								highlightColor
-							);
-						}; // od
-					};
-						// draw axis
-					if (drawAxis) {
-						Pen.moveTo((w.bounds.left+(pad/2))@(w.bounds.top+(pad/2)));
-						Pen.lineTo((w.bounds.left+(pad/2))@(w.bounds.top+w.bounds.height-(pad/2)));
-						Pen.lineTo(
-							(w.bounds.left-(pad/2)+w.bounds.width)@(w.bounds.top+w.bounds.height-(pad/2)));
-						specX.minval.round(0.001).asString
-							.drawAtPoint(
-								(w.bounds.left+(pad/2)+10)@
-								(w.bounds.height-(pad/2)+10));
-						xAxisName
-							.drawAtPoint(
-								(w.bounds.left+(w.bounds.width/2))@
-								(w.bounds.height-(pad/2)+10));
-						specX.maxval.round(0.001).asString
-							.drawAtPoint(
-								(w.bounds.left+10+w.bounds.width-20-(pad/2))@
-								(w.bounds.height-(pad/2)+10));
-
-
-
-						Pen.rotate(-pi/2);
-						Pen.translate(w.bounds.height.neg, 0);
-						specY.minval.round(0.001).asString
-							.drawAtPoint((pad/2)@(w.bounds.left+(pad/2) -20));
-						yAxisName.
-							drawAtPoint((w.bounds.height/2)@(w.bounds.left+(pad/2) -20));
-						specY.maxval.round(0.001).asString
-							.drawAtPoint((w.bounds.height - (pad/2))@(w.bounds.left+(pad/2) -20));
-						Pen.translate(w.bounds.height, 0);
-						Pen.rotate(pi/2);
-						Pen.stroke;
-					};
-						// draw values
-					if (drawValues) {
-						adjustedData.do{|item, i|
-							data.at(i).round(0.001).asString.drawAtPoint(
-								((item[0]  * width) + (pad/2))
-								@
-								(((1-item[1]) * height) + (pad/2) + 10)
-							)
-						}
-					}
-				}; // end Pen.use
-			});
-	}
-	canFocus_ { arg state = false;
-		plot.canFocus_(state);
-	}
-	canFocus {
-		^plot.canFocus;
-	}
-	visible_ { arg bool;
-		plot.visible_(bool)
-	}
-	visible {
-		^plot.visible
-	}
 }
 
-JScatterView3d {
-	var scatterView;
-	var rotX, rotY, rotZ;
-	var specX, specY, specZ;
-	var data3d;
+RadioButton : UserView {
+  var <>traceColor, <>inset=0.2;
+  var <>selected=false;
+  var <>action;
 
-	*new {|parent, bounds, data, specX, specY, specZ, rotX = 0, rotY = 0, rotZ = 0|
-		^super.new.init3d(parent, bounds, data, specX, specY, specZ, rotX, rotY, rotZ);
-	}
+  *new {|parent, bounds|
+    ^super.new(parent, bounds).init;
+  }
 
-	init3d {|parent, bounds, data, argspecX, argspecY, argspecZ, argrotX, argrotY, argrotZ|
-		specX = argspecX ? [0, 1].asSpec;
-		specY = argspecY ? specX.copy;
-		specZ = argspecY ? specX.copy;
+  init {
+    this.background = Color.grey(0.1);
+    this.traceColor = Color.gray(0.9);
+    this.drawFunc_({|vw|
+      var width, height, inw, inh;
+      width = vw.bounds.width;
+      height = vw.bounds.height;
 
-		rotX = argrotX;
-		rotY = argrotY;
-		rotZ = argrotZ;
+      Pen.use {
+        Pen.color = this.background;
+        Pen.addRect(vw.bounds);
+        Pen.fill;
 
-		// [rotX, rotY, rotZ].postln;
+        Pen.color = this.traceColor;
+        Pen.addOval(Rect(0,0,width,height));
+        Pen.stroke;
 
+        if(selected) {
+          inw = inset*width; inh = inset*height;
+          Pen.addOval(Rect(inw,inh,width-(2*inw),height-(2*inh)));
+          Pen.fill;
+        };
+      };
+    });
 
-		// [-2.sqrt, 2.sqrt].asSpec approx. [-1.42, 1.42].asSpec
-		scatterView = ScatterView(parent, bounds, [[1, 1, 1]], [-1.42, 1.42].asSpec);
-		this.data = data;
-		this.refresh
-	}
-	data_{|data|
-		data3d = data.collect {|item|
-			Matrix.withFlatArray(3, 1, [
-				specX.unmap(item[0]),
-				specY.unmap(item[1]),
-				specZ.unmap(item[2])
-			] * 2 - 1);
-		};
-		scatterView.data = this.pr_project;
+    this.mouseUpAction_({|vw, xpos, ypos| this.setSelected(selected.not) });
 
-//		highlightItem = min(highlightItem, (adjustedData.size-1));
-	}
-	refresh {
-		scatterView.refresh;
-	}
-	rotX_{|val|
-		this.rot(val, rotY, rotZ);
-	}
-	rotY_{|val|
-		this.rot(rotX, val, rotZ);
-	}
-	rotZ_{|val|
-		this.rot(rotX, rotY, val);
-	}
-	rot {|rX, rY, rZ|
-		rotX = rX;
-		rotY = rY;
-		rotZ = rZ;
-		scatterView.data = this.pr_project;
-	}
-	drawMethod_{|method|
-		scatterView.drawMethod = method;
-	}
-	symbolSize_{|val|
-		scatterView.symbolSize = val;
-	}
-	symbolColor_{|val|
-		scatterView.symbolColor = val;
-	}
-	isHighlight_{|val|
-		scatterView.isHighlight_(val);
-	}
-	highlightItem_{|item|
-		scatterView.highlightItem_(item);
-	}
-	highlightRange{|start, end|
-		scatterView.highlightRange(start, end);
-	}
-	highlightColor_{|color|
-		scatterView.highlightColor_(color);
-	}
-	highlightSize_{|size|
-		scatterView.highlightSize_(size);
-	}
-	background_{|val|
-		scatterView.background = val;
-	}
-	resize{
-		^scatterView.resize
-	}
-	resize_{arg resize;
-		scatterView.resize_(resize)
-	}
-	pr_project {
-		var cx, cy, sx, sy, sz, cz, projectionMatrix;
-		sx = sin(rotX);
-		sy = sin(rotY);
-		sz = sin(rotZ);
+    this.refresh;
+  }
 
-		cx = cos(rotX);
-		cy = cos(rotY);
-		cz = cos(rotZ);
+  value { ^selected }
+  value_ {|val|
+    selected = val;
+    this.refresh;
+  }
 
-		projectionMatrix = Matrix.with([
-			[( (cy * cz) - (sx * sy * sz)), (sz.neg * cx), ((cz * sy) + (sz * sx * cy))],
-			[( (cy * sz) + (cz * sx * sy)), ( cz * cx),    ((sz * sy) - (sx * cy * cz))]
-		]);
+  setSelected {|val|
+    selected = val;
+    if(this.action.notNil) { this.action.(this, val) };
+    this.refresh;
+  }
 
 
-		^data3d.collect{|row|
-			(projectionMatrix * row).getCol(0)
-		};
-	}
 }
+
