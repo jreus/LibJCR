@@ -108,7 +108,7 @@ Syn {
 		var decorator, styler, subStyler, childView, childDecorator, substyler;
 		var subView, btn, key, s_info;
 		var searchText, searchList, searchTypeDropdown1, searchTypeDropdown2;
-		var width=300, height=800, lineheight=20;
+		var width=200, height=400, lineheight=20;
 		var findFunc;
 		if(synthdefs.isNil) { this.load };
 
@@ -136,7 +136,7 @@ Syn {
 		.items_(allTypes.putFirst("--").asArray).stringColor_(Color.white)
 		.background_(Color.clear);
 
-		searchList = ListView(childView, width@200)
+    searchList = ListView(childView, width@200)
 		.items_(allNames.asArray)
 		.stringColor_(Color.white)
 		.background_(Color.clear)
@@ -178,7 +178,7 @@ Syn {
 		};
 
 		subStyler = GUIStyler(childView);
-		subView = subStyler.getWindow("Subwindow", width@600);
+    subView = subStyler.getWindow("Subwindow", width@150);
 
 		searchList.action_({ |sbs| // action when selecting items in the search list
 			var key, s_info, btn, txt, extext, synthdef = sbs.items[sbs.value];
@@ -196,7 +196,7 @@ Syn {
 
 			btn = styler.getSizableButton(subView, "source", size: 50@lineheight);
 			btn.action = {|btn|
-				var idx, d = Document.open(s_info.filePath);
+        [s_info, s_info.filePath].postln; Document.open(s_info.filePath);
 			};
 
 			btn = subStyler.getSizableButton(subView, key.asString, size: 100@lineheight);

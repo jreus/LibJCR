@@ -35,25 +35,49 @@ instances within a performance concept.
 
 @usage
 
+Create a file called root.scd where your root scene will be located.
+From inside the root.scd call
+~sc = Scenes.new;
+
 f = "".resolveRelative +/+ "scenes";
 z = Scenes(f).makeGui;
 ________________________________________________________________*/
 
 Scenes {
-	var scenePath, instancePath, sceneNames;
-	var win;
+	var rootPath, scenePath, instancePath, sceneNames;
+	var win, onSelectOption=0;
 	*new {|scenedir|
 		^super.new.init(scenedir);
 	}
 
-	init {|scenedir|
-		if(scenedir.isNil) { scenedir = Document.current.path.dirname +/+ "_scenes/" };
-		scenedir.postln;
+  // should throw a fatal error if not being run from root.scd
+	init {|rootpath, scenedir|
+    if(rootpath.isNil) { // If rootpath is not specified then this method must be called from root.scd
+      if(PathName(Document.current.path).fileName != "root.scd") {
+        "Scenes.new must be called from 'root.scd', or a path to 'root.scd' must be provided".throw;
+      };
+      rootpath = Document.current.path;
+    };
+    rootPath = rootpath;
+		if(scenedir.isNil) { scenedir = rootpath.dirname +/+ "_scenes/" };
+		rootpath.postln;
+    scenedir.postln;
 		scenePath = scenedir;
-		if(File.exists(scenePath).not) { File.mkdir(scenePath) };
+		if(File.exists(scenePath).not) {
+      File.mkdir(scenePath);
+    };
+
+    if(File.exists(rootPath).not) {
+      File.use(rootPath,"w", {|fp|
+        fp.write("/*** Root Scene ***/\nMacros.load\n~sc=Scene.new\n")
+      });
+    };
 		sceneNames = (scenePath +/+ "*.scd").pathMatch.collect {|it|
 			PathName(it).fileNameWithoutExtension
 		};
+    "SCENE NAMES % %".format(sceneNames[0].class.postln, sceneNames).postln;
+    sceneNames = sceneNames.insert(0, "root"); // root is a reserved scene name
+    "insert worked..".warn;
 		instancePath = scenePath +/+ "instances/";
 		if(File.exists(instancePath).not) { File.mkdir(instancePath) };
 	}
@@ -67,7 +91,7 @@ Scenes {
     if(position.notNil) {
       top = position.y; left = position.x;
     };
-    win = Window("Scene Navigator", Rect(left, top, (width+10), 400));
+    win = Window("Scene Navigator", Rect(left, top, (width+10), height));
 		styler = GUIStyler(win);
 
 		// child view inside window, this is where all the gui views sit
@@ -80,27 +104,36 @@ Scenes {
 		addBtn = styler.getSizableButton(childView, "+", "+", lineheight@lineheight);
 		deleteBtn = styler.getSizableButton(childView, "-", "-", lineheight@lineheight);
 
-		sceneList = ListView(childView, width@200)
+    sceneList = ListView(childView, width@(height/4))
 		.items_(sceneNames.asArray).value_(nil)
 		.stringColor_(Color.white).background_(Color.clear)
 		.hiliteColor_(Color.new(0.3765, 0.5922, 1.0000, 0.5));
 
 		addBtn.action = {|btn|
 			var idx, newscene = sceneName.value;
+      if(newscene == "root") {
+        "'root' is a reserved scene name".error;
+
+      } {
 			idx = sceneList.items.indexOfEqual(newscene);
 			if(idx.notNil) { // a scene by that name already exists
 				"A scene with the name % already exists".format(newscene).warn;
 			} { // create a new scene
 				var scenepath = scenePath +/+ newscene ++ ".scd";
         "new file at % % %".format(scenepath, newscene, sceneName.value).postln;
-				File.use(scenepath, "w", {|fp| fp.write("/* New Scene */") });
+				File.use(scenepath, "w", {|fp| fp.write("/* New Scene % */".format(newscene)) });
 				sceneList.items = sceneList.items.add(newscene);
 			};
+      };
 		};
 
 		deleteBtn.action = {|btn|
 			var dialog,tmp,bounds,warning,scene,scenepath;
 			scene = sceneList.items[sceneList.value];
+      if(scene == "root") {
+        "'root' cannot be deleted".error;
+
+      } {
 			scenepath = scenePath +/+ scene ++ ".scd";
 			warning = "Delete %\nAre you sure?".format(scene);
 			bounds = Rect(win.bounds.left, win.bounds.top + 25, win.bounds.width, win.bounds.height);
@@ -121,63 +154,101 @@ Scenes {
 				dialog.close;
 			});
       dialog.front;
+      };
 		};
 
 
 		subStyler = GUIStyler(childView); // styler for subwindow
-		subView = subStyler.getWindow("Subwindow", width@600); // subwindow
+    subView = subStyler.getWindow("Subwindow", width@(height/2)); // subwindow
 
 		sceneList.action_({ |lv| // action when selecting items in the scene list -> build the scene info view
-			var btn, radio, createNewInstanceFunc;
+			var btn, radio, instanceList, loadInstanceFunc, newInstanceFunc, getInstanceNames;
 			var matching, scene, templatepath;
 			scene = lv.items[lv.value];
-			templatepath = scenePath +/+ scene ++ ".scd";
+      if(scene == "root") {
+        templatepath = rootPath;
+      } {
+        templatepath = scenePath +/+ scene ++ ".scd";
+      };
 			scene.postln;
 
       // *** BUILD SCENE INFO WINDOW ***
       subView.removeAll; // remove views & layout for previous scene info window
 			subView.decorator = FlowLayout(subView.bounds);
 
-      createNewInstanceFunc = {
-        // Does an instance of the scene already exist?
-        matching = Document.openDocuments.select {|doc| doc.title.contains(scene) };
-        matching.postln;
-        matching.size.switch(
-          0, { // if no, create a new file/instance & open it
-            var original, instance;
-            instance = instancePath +/+ Date.getDate.stamp ++ "_" ++ scene ++ ".scd";
-            File.use(instance, "w", {|fp| fp.write(File.readAllString(templatepath)) });
-            Document.open(instance);
-          },
-          1, { // if yes, open that instance
-            Document.open(matching[0].path);
-          },
-          { // otherwise you have multiple open instances
-            var im = matching.select {|doc| doc.title != (scene++".scd") };
-            Document.open(im[0].path);
-            "Multiple Matching Instances... ".postln;
-          }
-        );
+      getInstanceNames = {|sceneName|
+        (instancePath +/+ "*%.scd".format(sceneName)).pathMatch.sort.reverse.collect {|path|
+          PathName(path).fileName[..12];
+        };
       };
 
-			btn = styler.getSizableButton(subView, "open template", size: 80@lineheight);
+      newInstanceFunc = {|sceneName|
+        var res, instances;
+        res = instancePath +/+ Date.getDate.stamp ++ "_" ++ sceneName ++ ".scd";
+        File.use(res, "w", {|fp| fp.write(File.readAllString(scenePath +/+ sceneName ++ ".scd")) });
+        instances = getInstanceNames.(sceneName);
+        instanceList.items_(instances).refresh;
+        res;
+      };
+
+      loadInstanceFunc = {|option=0|
+        var allInstancePaths, lastInstancePath=nil, lastInstanceDate, newInstancePath=nil;
+        allInstancePaths = (instancePath+/+"*%.scd".format(scene)).pathMatch.sort;
+        if(allInstancePaths.size > 0) {
+          lastInstancePath = allInstancePaths.last;
+          lastInstanceDate = Date.fromStamp(PathName(lastInstancePath).fileName[..12]);
+        };
+
+        // option 0 do nothing
+
+        if(option == 1) {// load last instance, if no instance exists, create one
+          if(lastInstancePath.isNil) {
+            Document.open(newInstanceFunc.(scene));
+          } {
+            Document.open(lastInstancePath);
+          };
+        };
+        if(option == 2) {// create new instance if no "recent" instance already exists
+          if(lastInstancePath.isNil.or { (Date.getDate.daysDiff(lastInstanceDate)) > 1 }) {
+            Document.open(newInstanceFunc.(scene));
+          } {
+            Document.open(lastInstancePath);
+          }
+        };
+
+      };
+
+			btn = styler.getSizableButton(subView, "open template", size: 90@lineheight);
 			btn.action = {|btn| Document.open(templatepath) };
-      btn = styler.getSizableButton(subView, "new instance", size: 80@lineheight);
-      btn.action = createNewInstanceFunc;
+      btn = styler.getSizableButton(subView, "new instance", size: 90@lineheight);
+      btn.action = {|btn| newInstanceFunc.(scene); instanceList.value_(0) };
 
       // Radiobuttons
       // No Auto Loading
       // Auto Load Latest Instance
       // Auto Load New Instance (if latest is older than x days)
-      radio = RadioButton(subView);
+      radio = RadioSetView(subView, width@50).font_(subStyler.font).textWidth_(100).radioWidth_(10);
+      radio.add("no load");
+      radio.add("last instance");
+      radio.add("new instance");
+      radio.setSelected(onSelectOption);
+      radio.action_({|vw,idx| onSelectOption = idx });
 
 
-      // Instances List
+      // Instance List
+      instanceList = ListView(subView, width@100)
+      .items_(getInstanceNames.(scene))
+      .value_(nil).stringColor_(Color.white).background_(Color.clear)
+      .hiliteColor_(Color.new(0.3765, 0.5922, 1.0000, 0.5)).font_(subStyler.font);
 
-
+      // TODO: doubleClick to open instance
+      instanceList.action_({|vw| "%/%_%.scd".format(instancePath, vw.items[vw.value], scene).postln });
+      instanceList.enterKeyAction_({|vw|
+        Document.open("%/%_%.scd".format(instancePath, vw.items[vw.value], scene))
+      });
       // *** END SCENE INFO WINDOW ***
 
-
+      loadInstanceFunc.(onSelectOption);
 
 		}); // END SCENELIST ACTION
 

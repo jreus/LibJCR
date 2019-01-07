@@ -32,7 +32,8 @@ w.front;
 
 ***/
 RadioSetView : CompositeView {
-  var <buttons, <>traceColor;
+  var <buttons, <traceColor, <font, <textAlign;
+  var <radioWidth, <textWidth;
   var <selectedIndex=nil;
   var <>action;
 
@@ -41,16 +42,29 @@ RadioSetView : CompositeView {
   }
 
   init {
-    this.addFlowLayout;
+    this.decorator = FlowLayout(this.bounds, 0@0, 0@0);
     buttons = List.new;
-    traceColor = Color.gray(0.9);
-    this.background = Color.gray(0.1);
+    traceColor = Color.gray(0.1);
+    this.background = Color.clear;
+    font = Font("Arial", 10);
+    textAlign = \left;
+    radioWidth = 30;
+    textWidth = 50;
+    ^this;
+  }
+  font_ {|newfont| font=newfont; buttons.do{|btn| btn[0].font_(newfont) } }
+  textAlign_ {|align| textAlign=align; buttons.do{|btn| btn[0].align_(align) } }
+  radioWidth_ {|width| radioWidth=width; buttons.do{|btn| btn[1].resizeTo_(width,width) } }
+  textWidth_ {|width| textWidth=width; buttons.do{|btn| btn[0].resizeTo_(width, this.radioWidth) } }
 
+  traceColor_ {|newcolor|
+    traceColor=newcolor;
+    buttons.do{|btn| btn[0].stringColor_(newcolor); btn[1].traceColor_(newcolor) };
   }
 
   setSelected {|newindex|
     this.selectedIndex_(newindex);
-    buttons[newindex].setSelected(true);
+    buttons[newindex][1].setSelected(true);
   }
 
   selectedIndex_{|newindex|
@@ -61,8 +75,10 @@ RadioSetView : CompositeView {
   add {|text|
     var newbut, newtext;
     // add layout here...
-    newtext = StaticText(this, 50@20).string_(text).stringColor_(this.traceColor);
-    newbut = RadioButton(this, 20@20).background_(this.background).traceColor_(this.traceColor);
+    newtext = StaticText(this, textWidth@radioWidth).string_(text)
+    .stringColor_(this.traceColor).font_(font).align_(textAlign);
+    newbut = RadioButton(this, radioWidth@radioWidth)
+    .background_(Color.clear).traceColor_(traceColor);
     newtext.mouseUpAction = {|txt| newbut.setSelected(newbut.selected.not) };
     newbut.action = {|vw, sel|
       this.buttons.do {|but, idx|

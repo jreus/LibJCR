@@ -74,7 +74,7 @@ Macros {
 	classvar <win;
 	classvar <macroPath, <defaultLocalMacroPath;
 
-	classvar <globalMacroPath;
+	classvar <globalMacroPath, <onlyGlobal=false;
 
 	*initClass {
 		parseStr = ">>";
@@ -86,33 +86,43 @@ Macros {
 
 
 
-	*load {|macrodir|
+  // onlyGlobal==true skips initializing a local config
+	*load {|macrodir, onlyglobal=false|
 		var xml, filenames, yaml;
+    onlyGlobal = onlyglobal;
 
-		if(macrodir.isNil) { macrodir = Document.current.path.dirname +/+ "_macros/" };
-		macroPath = macrodir;
-		defaultLocalMacroPath = macroPath +/+ "local_macros.yaml";
+    "GLOBAL MACRO PATH %".format(macroPath,globalMacroPath).postln;
+		if(File.exists(globalMacroPath).not) {
+      this.makeDefaultMacroFile(globalMacroPath)
+    };
 
-		"LOCAL MACROS: %\nGLOBAL MACROS %".format(macroPath,globalMacroPath).postln;
-
-		if(File.exists(macroPath).not) { File.mkdir(macroPath) };
-		if(File.exists(defaultLocalMacroPath).not) { File.use(defaultLocalMacroPath, "w",
-			{|fp| fp.write("# Local Macros\n")}) };
-		if(File.exists(globalMacroPath).not) { this.makeDefaultMacroFile(globalMacroPath) };
-
-		// Load Global Macros from default macro file
 		yaml = globalMacroPath.parseYAMLFile;
 		yaml.keysValuesDo {|key,val| this.addMacro(Macro.newFromDict(key, val)) };
 
-		// Load local Macros from Macros directory
-		filenames = (macroPath +/+ "*.yaml").pathMatch;
+    if(onlyGlobal.not) { // load local macros
+      if(macrodir.isNil) {
+        macrodir = Document.current.path.dirname +/+ "_macros/";
+      };
+      macroPath = macrodir;
+      defaultLocalMacroPath = macroPath +/+ "local_macros.yaml";
+      "LOCAL MACRO PATH: %\n".format(defaultLocalMacroPath).postln;
+      if(File.exists(macroPath).not) { File.mkdir(macroPath) };
+      if(File.exists(defaultLocalMacroPath).not) {
+        File.use(defaultLocalMacroPath, "w",
+          {|fp| fp.write("# Local Macros\n")})
+      };
 
-		filenames.do {|path|
-			yaml = path.parseYAMLFile;
-			if(yaml.notNil) {
-				yaml.keysValuesDo {|key,val| this.addMacro(Macro.newFromDict(key, val)) };
-			};
-		};
+      // Load local Macros from Macros directory
+      filenames = (macroPath +/+ "*.yaml").pathMatch;
+      filenames.do {|path|
+        yaml = path.parseYAMLFile;
+        if(yaml.notNil) {
+          yaml.keysValuesDo {|key,val|
+            this.addMacro(Macro.newFromDict(key, val))
+          };
+        };
+      };
+    };
 
 		names.sort;
 		this.active_(true);
@@ -564,14 +574,12 @@ d.replaceLine(51, "d.cursorLine;");
 ***/
 + Document {
 
-	// Get the current line where the cursor is positioned.
+	// Get the line number where the cursor is positioned.
 	cursorLine {
-		var ln,lines,thisline,doc;
-		doc=this;
-		thisline = doc.getSelectedLines(doc.selectionStart()-1, 0); // get the full current line
-		thisline = thisline.replace("\n","");
-		lines = doc.string.split($\n);
-		ln = lines.detectIndex({|item| item == thisline; }) + 1;
+		var ln,lines,thisline,doc, cpos, cnt=0;
+    cpos = this.selectionStart + 1;
+    lines = this.string.split($\n);
+    ln = lines.detectIndex({|item,i| cnt = cnt + item.size + 1; if(cpos <= cnt) { true } { false } }) + 1;
 		^ln;
 	}
 

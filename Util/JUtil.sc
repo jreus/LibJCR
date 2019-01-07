@@ -205,3 +205,83 @@ JLog {
 		^Color.new(val, val, 0, alpha);
 	}
 }
+
+/*
+Date.getDate.rawSeconds / 86400; // days
+Date.getDate.rawSeconds
+Date.getDate.daysSinceEpoch
+Date.getDate.calcFirstDayOfYear
+d = "181230_150017";
+e = "190105_000000";
+Date.getDate.daysDiff(Date.fromStamp(e))
+*/
++ Date {
+
+  /*
+  Creates a date object from a datetime stamp of the format YYMMDD_HHMMSS
+  */
+  *fromStamp {|datetimestamp|
+    ^super.new.initFromStamp(datetimestamp);
+  }
+
+  initFromStamp {|dts|
+    if(dts.isNil.or { dts.isKindOf(String).not.or { dts.size != 13 } }) {
+      throw("Bad Time Stamp Format %".format(dts));
+    };
+    year = dts[..1].asInt;
+    year = if(year<70) { year+2000 } { year+1900 };
+    month = dts[2..3].asInt;
+    day = dts[4..5].asInt;
+    hour = dts[7..8].asInt;
+    minute = dts[9..10].asInt;
+    second = dts[11..12].asInt;
+   // dayOfWeek = ; // TODO
+    this.calcSecondsSinceEpoch;
+  }
+
+  /*
+    Returns number of days since civil 1970-01-01.  Negative values indicate
+    days prior to 1970-01-01.
+  Preconditions:  y-m-d represents a date in the civil (Gregorian) calendar
+    m is in [1, 12]
+    d is in [1, last_day_of_month(y, m)]
+    y is "approximately" in [numeric_limits<Int>::min()/366, numeric_limits<Int>::max()/366]
+    Exact range of validity is:
+    [civil_from_days(numeric_limits<Int>::min()),
+    civil_from_days(numeric_limits<Int>::max()-719468)]
+*/
+  daysSinceEpoch {
+    var era, yoe, doy, doe, res;
+    var y=year,m=month,d=day;
+    y = y - (m <= 2).asInt;
+    era = if(y>=0) {y} {y-399}; era = era / 400;
+    yoe = y - (era * 400);      // [0, 399]
+    doy = (153*(m + (m > 2).if({-3},{9})) + 2)/5 + d-1;  // [0, 365]
+    doe = yoe * 365 + yoe/4 - yoe/100 + doy;         // [0, 146096]
+    res = era * 146097 + doe.asInt - 719468;
+    ^res;
+  }
+
+  calcSecondsSinceEpoch {
+    var res;
+    res = this.daysSinceEpoch + second + minute*60 + hour*3600;
+    this.rawSeconds_(res);
+    ^res;
+  }
+
+  /*
+  This will give the day of the week as 0 = Sunday, 6 = Saturday. This result can easily be adjusted by adding a constant before or after the modulo 7
+  */
+  calcFirstDayOfYear {
+    var res;
+    res = (year*365 + trunc((year-1) / 4) - trunc((year-1) / 100) + trunc((year-1) / 400)) % 7;
+    ^res;
+  }
+
+  /*
+  this-that in days
+  */
+  daysDiff {|that|
+    ^(this.daysSinceEpoch - that.daysSinceEpoch)
+  }
+}

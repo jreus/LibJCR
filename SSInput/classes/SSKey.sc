@@ -1,5 +1,7 @@
 /***********************************************
-Server-side keyboard and mouse input hooks into the language. Allows keylistening and mouse listening OS-wide, even when SuperCollider is not the active application.
+Server-side keyboard input hooks into sclang.
+Allows callback functions to be attached to key actions
+that operate even when SuperCollider is not the active application.
 
 (C) 2015 Jonathan Reus / GPLv3
 
@@ -9,8 +11,10 @@ Server-side keyboard and mouse input hooks into the language. Allows keylistenin
 
 /*
 SSKey
-A keylistener that responds OS-wide, even when SuperCollider is not the key application.
-The key listener won't respond to key combinations.. eg. shift, cmd, alt, ctrl are ignored.
+A keylistener that responds OS-wide, even when SuperCollider is
+not the key application.
+The key listener won't respond to modifier key combinations..
+shift, cmd, alt, ctrl are ignored.
 
 @usage
 
@@ -330,118 +334,3 @@ SSKey {
 	}
 
 }
-
-
-/*********************************************************************************************
-SSMouse
-A mouse input listener that responds OS-wide, even when SuperCollider is not the key application.
-*********************************************************************************************/
-SSMouse {
-	classvar singleton;
-	var callbacks,listenersynth,oscresponder,responderKey;
-
-
-	*enable {
-		SSMouse.getSingleton().enable;
-	}
-
-	*disable {
-		SSMouse.getSingleton().disable;
-	}
-
-	initme {|server|
-		this.initCallbacks;
-		responderKey = ("/SSMouse" ++ rrand(1,32000)).asSymbol;
-	}
-
-	*getSingleton {
-		if(singleton.isNil) {
-			singleton = super.new.initme(Server.default);
-			CmdPeriod.add({
-				SSMouse.disable;
-			});
-		};
-		^singleton;
-	}
-
-	*addMouseResponder {|mouseaction, cb_func|
-		SSMouse.getSingleton().addMouseResponder(mouseaction,cb_func);
-	}
-
-	/* mouseaction - a valid symbol representing a mouse function (movex, movey, button)
-	cb_func - a callback to perform when the given mouseaction happens.
-	cb_func for movex/movey has 1 argument, the mouse position
-	cb_func for button has 1 argument, the button up/down value
-	EX:
-	{|val| if (val == 1) {"Mouse is down".postln;} {"Mouse is up".postln;}; }
-	*/
-	addMouseResponder {|mouseaction, cb_func|
-		if (callbacks.includesKey(mouseaction).not) {
-			Error("Mouse action"+mouseaction+" not valid").throw;
-		};
-		callbacks.put(mouseaction,cb_func);
-	}
-
-	// initialize synth and osc responder
-	enable {
-		if(this.isEnabled) {
-			"Keyboard is already enabled".postln;
-		} {
-			// SC 3.5 has the Changed UGEN, here we use HPZ2 to detect keystate changes
-			listenersynth = {
-				var xsig = MouseX.kr(0,1,lag:0);
-				var ysig = MouseY.kr(0,1,lag:0);
-				var bsig = MouseButton.kr(-1,1,lag:0);
-				var xhpz = HPZ2.kr(xsig) > 0;
-				var yhpz = HPZ2.kr(ysig) > 0;
-				var bhpz = HPZ2.kr(bsig) > 0;
-				SendReply.kr(xhpz | yhpz | bhpz, responderKey, [xhpz,yhpz,bhpz,xsig,ysig,bsig]);
-			}.play;
-
-
-
-			// OSCFunc available only in SC 3.5
-			// Here's the 3.4.4 compatible version
-			oscresponder = OSCresponder(nil, responderKey, {|t, r, msg|
-				var movex=msg[3],movey=msg[4],button=msg[5];
-				var xpos=msg[6],ypos=msg[7],bstate=msg[8];
-
-				if (movex.asBoolean) {
-					callbacks['movex'].value(xpos);
-				};
-				if (movey.asBoolean) {
-					callbacks['movey'].value(ypos);
-				};
-				if (button.asBoolean) {
-					callbacks['button'].value(bstate);
-				};
-
-			}).add;
-
-			"SSMouse enabled".postln;
-		};
-	}
-
-	isEnabled { ^(listenersynth.notNil && oscresponder.notNil); }
-
-	// free all resources
-	disable {
-		listenersynth.free;
-		oscresponder.remove;
-		listenersynth = oscresponder = nil;
-		"SSMouse disabled".postln;
-	}
-
-	initCallbacks {
-		callbacks ?? {
-			callbacks = (
-				'movex':{|xpos| ("MOUSEX: "++xpos).postln},
-				'movey':{|ypos| ("MOUSEY: "++ypos).postln},
-				'button':{|bstate| ("MOUSEB: "++bstate).postln}
-			);
-		};
-	}
-
-}
-
-
