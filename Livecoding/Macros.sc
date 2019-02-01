@@ -145,7 +145,7 @@ Macros {
 				rewritePattern: "(\n
 s.options.numInputBusChannels = @1@; s.options.numOutputBusChannels = @1@; s.options.memSize = 65536; s.options.blockSize = 256; s.options.numWireBufs = 512;\n
 s.waitForBoot { if(m.notNil) { m.window.close }; m = s.meter; m.window.alwaysOnTop=true; m.window.front; b = m.window.bounds; l = Window.screenBounds.width - b.width; m.window.bounds = Rect(l, 0, b.width, b.height);
- Syn.load;
+ Syn.load; Macros.load;
 };\n
 );",
 				rewriteFunc: nil,
@@ -173,6 +173,24 @@ Ndef(\\n%, {arg amp=1.0, pan=0;\n
 });\n
 );\n
 Ndef(\\n%).play(out:0, numChannels: 1);\n".format(~nMacroNdefs, ~nMacroNdefs);
+			},
+				rewritePattern: nil,
+				actionFunc: nil
+			));
+      res.put("pdef", (
+        type: "rewrite",
+				inputPattern: "pdef",
+				rewriteFunc: {|input,args|
+					if(~nMacroPdefs.notNil) { ~nMacroPdefs = ~nMacroPdefs + 1 } { ~nMacroPdefs = 0 };
+"
+Pdef(\\p%).clear;
+(\n
+Pdef(\\p%, {arg amp=1.0, pan=0;\n
+\tvar sig;\n
+\tsig = SinOsc.ar(440) * EnvGen.ar(Env.perc, Impulse.ar(1));\n
+});\n
+);\n
+Ndef(\\p%).play(out:0, numChannels: 1);\n".format(~nMacroPdefs, ~nMacroPdefs, ~nMacroPdefs);
 			},
 				rewritePattern: nil,
 				actionFunc: nil

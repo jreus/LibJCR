@@ -18,6 +18,10 @@ shift, cmd, alt, ctrl are ignored.
 
 @usage
 
+s.boot;
+SSKey.enable(s);
+
+
 
 */
 SSKey {

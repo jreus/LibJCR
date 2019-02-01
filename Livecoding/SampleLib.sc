@@ -50,7 +50,7 @@ SampleLib.gui; // open gui editor
 
 *******************************************************************/
 
-SampleLib {
+Smpl {
   classvar <samples; // all available sample files by id
   classvar <samplesByGroup; // available sample files, by group name
   classvar <allGroups, <allTags; // lists of all available sample groups and tags
@@ -60,7 +60,7 @@ SampleLib {
   classvar <activeServer; // server where buffers are allocated and loaded, should be set on load
 
   // gui variables
-  classvar <win, <playLooped=false, <playOnSelect=true;
+  classvar <win, <playLooped=false, <autoPlay=true;
   classvar <currentSample, <sampleFilePlayer, <cursorRoutine, <currentTimePosition=0;
 
   // boolean toggles lazyloading of samples, false by default. If true will save some ram by only loading samples when necessary
@@ -76,7 +76,6 @@ SampleLib {
     globalSamplesPath = "~/_samples".absolutePath;
   }
 
-
   // private method
   *pr_checkServerAlive {|errorFunc|
     activeServer = activeServer ? Server.default;
@@ -89,7 +88,7 @@ SampleLib {
   // By default will look for a local '_samples' directory in the same directory as the current document.
   // A global samples directory will be searched for at globalSamplesPath
   // If a server is not provided, server will be the default server.
-  *load {|server=nil,localsampledir=nil,verbose=false,limit=nil|
+  *load {|server=nil,localsampledir=nil,verbose=false,limit=nil,doneFunc=nil|
     var samplePath;
     activeServer = server;
     this.pr_checkServerAlive({^nil});
@@ -119,6 +118,7 @@ SampleLib {
     allGroups = allGroups.asList.sort;
     allTags = allTags.asList.sort;
     "\n... Finished Loading % Samples ...".format(samples.size).postln;
+    if(doneFunc.notNil) { doneFunc.value() };
   }
 
   // private method
@@ -126,43 +126,42 @@ SampleLib {
     var res;
     res = block {|break|
       samplePath.filesDo {|path,i|
-        var md; // metadata
+        var sf; // samplefile
         var id, group, groupId, preStr = ".";
 
-        md = SampleFile.openRead(path);
+        sf = SampleFile.openRead(path);
 
-        if(md.notNil) {
-          //[md.duration, md.headerFormat, md.sampleFormat, md.numFrames, md.numChannels, md.sampleRate, path.folderName, path.extension, path.fileName, md.path].postln;
+        if(sf.notNil) {
+          //[sf.duration, sf.headerFormat, sf.sampleFormat, sf.numFrames, sf.numChannels, sf.sampleRate, path.folderName, path.extension, path.fileName, sf.path].postln;
 
           id = path.fileNameWithoutExtension.replace(" ","");
-          block {|duplicate|
-           while {samples.at(id).notNil} {
-              if(samples.at(id).path == md.path) { // this exact sample already exists
-                duplicate.value;
+          if(samples.at(id).notNil) {
+              if(samples.at(id).path != sf.path) {
+              // if paths are equal, the sample has already been loaded
+              id = "%-$".format(sf.folderGroups.last.replace(" ","_"), id);
               };
-              id = id ++ "*"; // otherwise add asterixes until a free id is found
-            };
           };
+
           if(limit.notNil.and({samples.at(id).isNil}).and {samples.size >= limit}) { break.value(\limit) };
-          md.name = id;
-          samples.put(id, md);
+          sf.name = id;
+          samples.put(id, sf);
           groupId = path.folderName.asSymbol;
           group = samplesByGroup.at(groupId);
           if(group.isNil) { // new group
             group = Dictionary.new;
             samplesByGroup.put(groupId, group);
           };
-          group.put(id, md);
-          md.library = groupId.asString;
+          group.put(id, sf);
+          sf.library = groupId.asString;
 
           if(lazyLoad == false) { // if lazyload not active, go ahead and load everything
-            md.loadFileIntoBuffer(activeServer);
+            sf.loadFileIntoBuffer(activeServer);
             preStr = "...";
           };
 
           if(verbose)
-            { "%[%: %]".format(preStr, path.folderName, path.fileName).postln }
-            { if(i%100 == 0) { ".".post } };
+          { "%[%: %]".format(preStr, path.folderName, path.fileName).postln }
+          { if(i%100 == 0) { ".".post } };
 
         } {
           if(verbose) { path.fileName.warn };
@@ -176,18 +175,28 @@ SampleLib {
   }
 
   // When lazyloading is active, preload lets you preload groups of samples
-  *preload {
-    /*** TODO: STUB ***/
+  *preload {|samples|
+    samples.do {|name|
+      var smp = this.samples[name];
+      if(smp.isNil) {
+        "Sample '%' does not exist, ignored".format(name).error;
+      } {
+        smp.loadFileIntoBuffer;
+      }
+    };
   }
 
-  // Returns the SampleFile for a given id
-  *at {|id|
+  // Returns the SampleFile for a given name
+  *at {|name, autoload=true, loadAction|
     var sample, result = nil;
     this.pr_checkServerAlive({^nil});
-    sample = this.samples[id];
+    sample = this.samples[name];
     if(sample.isNil) {
-      "sample '%' not found".format(id).error;
+      "sample '%' not found".format(name).error;
       ^nil
+    };
+    if(autoload) {
+      sample.loadFileIntoBuffer(action:loadAction);
     };
     ^sample;
   }
@@ -195,8 +204,9 @@ SampleLib {
 
   *gui {
     var styler, subStyler, decorator, childView, childDecorator, subView;
-    var searchText, searchList, findFunc, resetFunc;
+    var searchText, searchList, autoPlayCB, txt;
     var searchGroupDropdown, searchTagDropdown;
+    var findFunc, resetFunc;
     var width=400, height=800, lineheight=20, searchListHeight=300, subWinHeight;
     subWinHeight = height - searchListHeight - (lineheight*3);
 
@@ -232,11 +242,10 @@ SampleLib {
     .background_(Color.clear)
     .hiliteColor_(Color.new(0.3765, 0.5922, 1.0000, 0.5));
 
-    // clear playing samples & cursor routine
-    resetFunc = {
-      sampleFilePlayer.stop;
-      cursorRoutine.stop;
-    };
+
+    // Global options (Autplay, Loop, etc..)
+    #autoPlayCB,txt = styler.getCheckBoxAndLabel(childView, "autoplay", lineheight, lineheight, 40, lineheight);
+    autoPlayCB.value_(autoPlay).action_({|cb| autoPlay = cb.value });
 
 
     findFunc = { |name|
@@ -279,8 +288,9 @@ SampleLib {
       }
     });
 
-    searchList.action_({ |sl| // action when selecting items in the search list
-      var sf, sfplayer, id, s_info, btn, txt, check, sfview, insertButton;
+    // NEW SAMPLEFILE SELECT ACTION
+    searchList.action_({ |sl|
+      var sf, sfplayer, id, s_info, btn, txt, check, sfview, insertButton, insertEventBtn, insertArrayBtn, insertPathBtn;
       var playbut, tagfield;
       var playFunc, stopFunc;
 
@@ -289,10 +299,8 @@ SampleLib {
       "Selected % %".format(id, sf.path).postln;
       // load sample into memory, prep for playback, & create subwindow when done
       sf.loadFileIntoBuffer(activeServer, {|buf|
-        sfplayer = sf.getSamplePlayer(activeServer);
-        resetFunc.();
+        if(currentSample.notNil) {currentSample.cleanup};
         currentSample = sf;
-        sampleFilePlayer = sfplayer;
 
         // everything else happens on appclock
         {
@@ -306,171 +314,96 @@ SampleLib {
           subStyler.getSizableText(subView, sf.headerFormat, 40); // format
           subStyler.getSizableText(subView, sf.duration.round(0.01).asString ++ "s", 60); // length
 
-
           subStyler.getHorizontalSpacer(subView, width);
 
           // Tags
-          txt = subStyler.getSizableText(subView, "tags", 30);
-          tagfield = TextField(subView, (width-40)@lineheight);
+          tagfield = TextField(subView, (width-40)@lineheight).string_("tags");
 
-          btn = subStyler.getSizableButton(subView, sf.path, size: (width-100)@lineheight);
+          btn = subStyler.getSizableButton(subView, sf.path, size: (width-20)@lineheight);
           btn.action = {|btn| "open %".format(sf.path.dirname).unixCmd }; // browse in finder
 
+          // event & array buttons
+          insertEventBtn = subStyler.getSizableButton(subView, "event", size: 50@lineheight);
+          insertArrayBtn = subStyler.getSizableButton(subView, "array", size: 50@lineheight);
+          insertPathBtn = subStyler.getSizableButton(subView, "path", size: 50@lineheight);
 
-          // Timeline view
-          sfview = SoundFileView.new(subView, width@200).soundfile_(sf);
-          sfview.read(0, sf.numFrames);
-          sfview.timeCursorOn_(true).timeCursorColor_(Color.white).timeCursorPosition_(0);
+          /*
+          NEW TIMELINE VIEW (integrated into SampleFile)
+          */
+          sfview = sf.getWaveformView(subView, width@200);
 
-          // Insert play function into IDE action
+          // Insert a reference to the samplefile into the IDE
           insertButton.action_({|btn|
-            var st, len, end, doc;
-            #st,len = sfview.selections[sfview.currentSelection];
-            if(len==0) { end = -1 } { end = st + len };
-            doc = Document.current;
-            "Current: % %".format(doc.selectionStart, doc.title).postln;
+            var doc = Document.current;
             doc.insertAtCursor(
-              "SampleLib.samples.at(\"%\").play(s, 0, %, %, 1.0)"
-              .format(sf.name, st, end)
-            )
+              "SampleLib.samples.at(\"%\")".format(sf.name)
+            );
           });
 
-          // Transport & Playback Controls
-          playbut = subStyler.getSizableButton(subView, "Play", "Stop", 100@lineheight);
-
-          check = subStyler.getCheckBox(subView, "loop", lineheight, lineheight);
-          check.action_({|cb| if(cb.value == true) { playLooped=true } { playLooped=false } })
-          .value_(playLooped);
-          subStyler.getSizableText(subView, "loop", 20, \left, 10);
-
-          check = subStyler.getCheckBox(subView, "playonselect", lineheight, lineheight);
-          check.action_({|cb|
-            if(cb.value == true) { playOnSelect=true } { playOnSelect=false }
-          }).value_(playOnSelect);
-          subStyler.getSizableText(subView, "autoplay", 20, \left, 10);
-
-          playFunc = {|out=0,amp=1.0|
-            var st, end, len, loopst, pos;
-            #st, len = sfview.selections[sfview.currentSelection];
-            loopst = st;
-            if(len == 0) { end = sf.numFrames; loopst=0 } { end = st + len };
-            pos = currentTimePosition;
-            if((pos >= end).or {pos < st}) { pos = st };
-            sfplayer.positionBus.setSynchronous(pos);
-            sfplayer.play(out, pos, end, amp);
-            cursorRoutine = {
-              var cpos = pos;
-              loop {
-                sfview.timeCursorPosition = cpos;
-                currentTimePosition = cpos;
-                if(cpos >= end) {
-                  if(playLooped)
-                  { sfplayer.play(out, loopst, end, amp) }
-                  { playbut.valueAction_(0) };
-                };
-                0.01.wait;
-                cpos = sfplayer.positionBus.getSynchronous;
-            }}.fork(AppClock);
-          };
-
-          stopFunc = { sfplayer.stop; cursorRoutine.stop };
-
-          playbut.action_({ |btn|
-            if(btn.value == 1) { playFunc.() } { stopFunc.(); btn.refresh };
+          // insert a playable event into the IDE
+          insertEventBtn.action_({|btn|
+            var doc, insertString = sfview.getEventStringForCurrentSelection;
+            doc = Document.current;
+            doc.insertAtCursor(insertString);
           });
 
-
-          sfview.mouseUpAction_({|sfv|
-            var newpos, isPlaying, clickPos, regionLen;
-            isPlaying = sfplayer.isPlaying;
-            #clickPos, regionLen = sfv.selections[sfv.currentSelection];
-            "New Click % %".format(clickPos, regionLen).postln;
-            if(isPlaying) { // stop & play at new position
-              stopFunc.();
-              currentTimePosition = clickPos;
-              playFunc.();
-            } { // not playing, so just update the position
-              currentTimePosition = clickPos;
-              sfplayer.positionBus.setSynchronous(clickPos);
-            };
+          // insert an array with buffer and selection into the IDE
+          insertArrayBtn.action_({|btn|
+            var doc, arr = sfview.getArrayValuesForCurrentSelection;
+            var insertString = "[\"%\", %, %, %]".format(arr[0], arr[1], arr[2], arr[3]);
+            doc = Document.current;
+            doc.insertAtCursor(insertString);
           });
+
+          // insert a path to sample file into the IDE
+          insertPathBtn.action_({|btn|
+            var doc, insertString = sf.path;
+            doc = Document.current;
+            doc.insertAtCursor(insertString);
+          });
+
 
           win.onClose = {|win|
-            sampleFilePlayer.stop;
-            sampleFilePlayer = nil;
-            currentSample.close;
-            currentSample = nil;
-            cursorRoutine.stop;
-            cursorRoutine=nil;
+            // TODO: clean up everything on window close
+            // playnode
+            // soundfile
+            "CLEANUP SOUNDFILE ETC...".postln;
+            sfview.stop;
+            sf.stop;
           };
 
-        if(playOnSelect) { currentTimePosition=0; playbut.valueAction_(1) };
-      }.fork(AppClock);
+          // Audition the sound file if autoplay is checked
+          if(autoPlay) { sfview.play };
+        }.fork(AppClock);
+      });
+
+
     });
 
-
-  });
-
-  win.front;
-}
+    win.front;
+  }
 
 }
 
 
+/*
 SampleFilePlayer {
   var <positionBus=nil;
   var <playNode=nil;
   var <server=nil;
-  var <sFile=nil;
-
-  classvar <def1ch = \SampleFilePlayNode1Channel;
-  classvar <def2ch = \SampleFilePlayNode2Channel;
-
-
-  *new {|sf, serv|
-    ^super.new.init(sf, serv);
-  }
-
-  init {|sf, serv|
-    server = serv ? Server.default;
-    sFile = sf;
-    if(positionBus.isNil) {
-      positionBus = Bus.new(\control, numChannels: 1, server: server);
-    };
-  }
+  var <sf=nil;
+  var <sfview=nil;
+  var <triggerId;
 
 
-  *loadSynthDefs {
-    if(SynthDescLib.global.synthDescs.at(def1ch).isNil) {
-      SynthDef(def1ch, {|amp, out, start, end, buf, pBus|
-        var sig, head;
-        head = Line.ar(start, end, ((end-start) / (SampleRate.ir * BufRateScale.kr(buf))), doneAction: 2);
-        sig = BufRd.ar(1, buf, head, 0);
-        Out.kr(pBus, A2K.kr(head));
-        Out.ar(out, sig * amp);
-      }).add;
-    };
-
-    if(SynthDescLib.global.synthDescs.at(def2ch).isNil) {
-      SynthDef(def2ch, {|amp, out, start, end, buf, pBus|
-        var sig, head;
-        head = Line.ar(start, end, ((end-start) / (SampleRate.ir * BufRateScale.kr(buf))), doneAction: 2);
-        sig = BufRd.ar(2, buf, head, 0);
-        Out.kr(pBus, A2K.kr(head));
-        Out.ar(out, sig * amp);
-      }).add;
-    };
-  }
 
   /**** Sample Play Controls ****/
-  isPlaying { ^playNode.notNil }
-
   play {|out=0, startframe=0, endframe=(-1), amp=1.0, doneFunc|
     var sdef;
     this.stop;
-    if(endframe == -1 || (endframe > sFile.buffer.numFrames)) { endframe = sFile.buffer.numFrames };
-    if(sFile.buffer.numChannels == 2) { sdef = def2ch } { sdef = def1ch };
-    playNode = Synth.new(sdef, [\out, out, \buf, sFile.buffer, \pBus, positionBus,
+    if(endframe == -1 || (endframe > sf.buffer.numFrames)) { endframe = sf.buffer.numFrames };
+    if(sf.buffer.numChannels == 2) { sdef = sdef2ch } { sdef = sdef1ch };
+    playNode = Synth.new(sdef, [\out, out, \buf, sf.buffer, \pBus, positionBus,
       \amp, amp, \start, startframe, \end, endframe]).onFree({ positionBus.setSynchronous(endframe); playNode = nil; if(doneFunc.notNil) { doneFunc.value } });
     ^this;
   }
@@ -479,20 +412,164 @@ SampleFilePlayer {
 
 }
 
+*/
+
+
+SampleFileView : CompositeView {
+  var <sf;
+  var <oscfunc; // osc listener for cursor update messages
+  var <sfview; // SoundFileView at the core of this view
+  // other views
+  var <playButton, <loopCheckbox;
+
+  *new {|samplefile, parent, bounds, guistyler|
+    ^super.new(parent, bounds).init(samplefile, guistyler);
+  }
+
+  // TODO: Use guistyler, if nil create a new one..
+  init {|samplefile, guistyler|
+    var loopText;
+    if(samplefile.isNil) { "Invalid SampleFile provided to SampleFileView: %".format(samplefile).throw };
+    sf = samplefile;
+    playButton = Button(this, Rect(0, this.bounds.height - 20, 100, 20)).states_([["Play"],["Stop"]]);
+
+    loopCheckbox = CheckBox(this, Rect(120, this.bounds.height-20, 30, 30), "loop");
+    loopText = StaticText(this, Rect(160, this.bounds.height-20, 100, 30)).string_("loop").action_({|txt| loopCheckbox.valueAction_(loopCheckbox.value.not) });
+
+    loopCheckbox.action_({|cb|
+      sf.loop_(cb.value);
+      "looping %".format(cb.value).postln;
+    });
+
+    sfview = SoundFileView.new(this, Rect(0,0, this.bounds.width, this.bounds.height - 20)).soundfile_(sf);
+    sfview.read(0, sf.numFrames);
+    sfview.timeCursorOn_(true).timeCursorColor_(Color.white).timeCursorPosition_(0);
+    sfview.mouseUpAction_({|sfv|
+      var newpos, clickPos, regionLength;
+      #clickPos, regionLength = sfv.selections[sfv.currentSelection];
+      "Clicked % %".format(clickPos, regionLength).postln;
+    });
+
+    // Start/Stop button Action
+    playButton.action_({|btn|
+      if(btn.value==1) {// play
+        var st, end, len, res;
+        #st, len = sfview.selections[sfview.currentSelection];
+        if(len == 0) { end = sf.numFrames } { end = st + len };
+        if(st < sfview.timeCursorPosition) { st = sfview.timeCursorPosition };
+
+        // 1. enable OSCFunc to recieve cursor position
+        if(oscfunc.isNil) {
+          oscfunc = OSCFunc.new({|msg|
+            var id = msg[2], val = msg[3];
+            {
+            if(id == sf.triggerId) { // cursor position update
+              sfview.timeCursorPosition = val;
+            };
+            if(id == (sf.triggerId+1)) { // done trigger
+                var start, length;
+                #start, length = sfview.selections[sfview.currentSelection];
+                "done!".postln;
+                // if looping is enabled then loop
+                "looping is: % %".format(loopCheckbox, loopCheckbox.value).postln;
+                if(loopCheckbox.value == true) {
+                  // loop
+                  "loop damnit".postln;
+                  // TODO: Is explicitly resetting the player necessary here?
+                  //playNode.set(\start, start, \end, start+length, \loop, 1, \t_reset, 1);
+                } { // stop
+                  sf.stop();
+                  sfview.timeCursorPosition = st;
+                  playButton.value_(0);
+                };
+
+            };
+            }.fork(AppClock);
+          }, "/tr");
+        };
+
+        // 2. start a playback synth node (free previous if needed)
+        //    TODO: ^^^ set a minimum duration limit so as not to overload the system
+        res = sf.play(start: st, end: end, out: 0, amp: 1.0);
+        if(res.isNil) { sf.stop };
+
+      } {//stop
+        sf.stop;
+      };
+    });
+
+    ^this;
+  }
+
+  // Audition current selection
+  play {
+    playButton.valueAction_(1);
+  }
+
+  stop {
+    playButton.valueAction_(0);
+  }
+
+  currentSelection {
+    ^sfview.selections[sfview.currentSelection];
+  }
+
+  getEventStringForCurrentSelection {
+    var st, len, end;
+    #st,len = sfview.selections[sfview.currentSelection];
+    if(len==0) { end = -1 } { end = st + len };
+    ^sf.eventString(0.5, st, end);
+  }
+
+  getArrayValuesForCurrentSelection {
+    var st, len, end;
+    #st,len = sfview.selections[sfview.currentSelection];
+    if(len==0) { end = sf.numFrames } { end = st + len };
+    ^[sf.name, sf.numChannels, st, end];
+  }
+
+}
+
+
 SampleFile : SoundFile {
 
+  // SampleLib Plumbing
+  classvar rootFolder = "_samples";
+
   // ** Playback **
-  var <buffer;      // buffer, if loaded, on the server where this soundfile exists
-  var <playNode;    // synth node controlling buffer playback
+  var buffer;      // buffer, if loaded, on the server where this soundfile exists
 
   // ** Metadata **
-  var <>name, <tags, <>library;  // belongs to a sample library, name of library
+  var <>name, <tags, <>library, <folderGroups;  // belongs to a sample library, name of library
 
   // FUTURE:: fancier analysis-related things
   var frequency_profile;
   var average_tempo;
   var average_pitch;
   var markers; // time markers
+
+
+  // Playback PLUMBING
+  classvar <playdef1ch = \sfPlay1;
+  classvar <playdef2ch = \sfPlay2;
+  classvar <cursordef1ch = \SampleFileCursorPos1Channel;
+  classvar <cursordef2ch = \SampleFileCursorPos2Channel;
+
+  var <playNode;    // synth node controlling buffer playback
+  var <loop = false; // boolean: loop playback
+
+
+  // GUI plumbing
+  classvar <nextTriggerId=0;
+  var <triggerId;
+
+  // GUI views
+  var waveformview=nil; // main composite view
+
+  cleanup {
+    this.stop;
+    waveformview = nil;
+  }
 
   /*
   @Override
@@ -501,14 +578,125 @@ SampleFile : SoundFile {
   */
   *openRead {|path| if(this.isSoundFile(path)) { ^super.new.init(path) } { ^nil } }
 
+  // path is of type PathName
   init {|path|
+    triggerId = nextTriggerId;
+    nextTriggerId = nextTriggerId + 2;
+
     this.openRead(path.asAbsolutePath); // get metadata
     this.close; // close file resource
     tags = Set.new;
+    folderGroups = this.pr_getFolderGroups(path);
     // TODO: Should load tags and other info from external metadata file here
     name = path.fileNameWithoutExtension.replace(" ","");
 
   }
+
+  // path is of type PathName
+  pr_getFolderGroups {|path|
+    var dirnames, rootpos;
+    dirnames = path.pathOnly.split($/);
+    rootpos = dirnames.find([rootFolder]);
+    if(rootpos.isNil) {
+      ^nil;
+    } {
+     ^dirnames[(rootpos+1)..]; // everything after the root directory
+    };
+
+  }
+
+
+  // Get a waveform view attached to this samplefile
+  getWaveformView {|parent, bounds|
+    var loopText;
+    if(waveformview.notNil) { ^waveformview };
+    if(bounds.isKindOf(Point)) { bounds = Rect(0,0,bounds.x,bounds.y) };
+    waveformview = SampleFileView.new(this, parent, bounds);
+    ^waveformview;
+  }
+
+
+  // Play method for auditioning: should not be used in patterns or other timed musical applications.
+  // This method keeps only a single synth instance active and resets the playback position
+  // as needed. It works in tandem with SampleFileView to maintain cursor position and looping behavior.
+  play {|server=nil, start=0, end=(-1), out=0, amp=1.0|
+    var syn = if(numChannels == 2) { cursordef2ch } { cursordef1ch };
+    if(server.isNil) { server = Server.default };
+    this.pr_checkServerAlive(server, {^nil});
+    this.pr_checkBufferLoaded({^nil});
+    if(end == -1) { end = this.numFrames };
+    if(end-start > 1000) {
+    if(playNode.notNil) { playNode.free; playNode = nil };
+    playNode = Synth(syn, [\buf, buffer, \out, out, \amp, amp, \start, start, \end, end, \tid, triggerId, \loop, loop]);
+      ^this;
+    } {
+      ^nil;
+    };
+  }
+
+  stop {
+    if(playNode.notNil) { playNode.free; playNode = nil };
+  }
+
+  loop_ {|bool=false|
+    loop = bool;
+    if(playNode.notNil) { playNode.set(\loop, loop.asInt) };
+  }
+
+
+  *loadSynthDefs {
+    if(SynthDescLib.global.synthDescs.at(playdef1ch).isNil) {
+      SynthDef(playdef1ch, {|amp, out, start, end, buf|
+        var sig, head;
+        head = Line.ar(start, end, ((end-start) / (SampleRate.ir * BufRateScale.kr(buf))), doneAction: 2);
+        sig = BufRd.ar(1, buf, head, 0);
+        Out.ar(out, sig * amp);
+      }).add;
+    };
+
+    if(SynthDescLib.global.synthDescs.at(playdef2ch).isNil) {
+      SynthDef(playdef2ch, {|amp, out, start, end, buf|
+        var sig, head;
+        head = Line.ar(start, end, ((end-start) / (SampleRate.ir * BufRateScale.kr(buf))), doneAction: 2);
+        sig = BufRd.ar(2, buf, head, 0);
+        Out.ar(out, sig * amp);
+      }).add;
+    };
+
+    if(SynthDescLib.global.synthDescs.at(cursordef1ch).isNil) {
+      SynthDef(cursordef1ch, {|amp=0.5, out=0, tid, start=0, end, loop=1, buf, cursorRate=20|
+        var sig, pos, dur, env, t_done, reset;
+        var controlBlockFrames = SampleRate.ir / ControlRate.ir;
+        reset = \t_reset.tr(1);
+        dur = (end-start) / (SampleRate.ir * BufRateScale.kr(buf));
+        pos = Phasor.ar(reset, 1 * BufRateScale.kr(buf), start, end, start);
+        sig = BufRd.ar(1, buf, pos, 0);
+        t_done = T2K.kr(pos >= (end-controlBlockFrames));
+        SendTrig.kr(Impulse.kr(cursorRate) * (1 - t_done), tid, pos); // cursor position
+        SendTrig.kr(t_done, tid+1, 1.0); // done signal
+        FreeSelf.kr(t_done * (1-loop));
+        Out.ar(out, sig * amp);
+      }).add;
+    };
+
+    if(SynthDescLib.global.synthDescs.at(cursordef2ch).isNil) {
+      SynthDef(cursordef2ch, {|amp=0.5, out=0, tid, start=0, end, loop=1, buf, cursorRate=20|
+        var sig, pos, dur, env, t_done, reset;
+        var controlBlockFrames = SampleRate.ir / ControlRate.ir;
+        reset = \t_reset.tr(1);
+        dur = (end-start) / (SampleRate.ir * BufRateScale.kr(buf));
+        pos = Phasor.ar(reset, 1 * BufRateScale.kr(buf), start, end, start);
+        sig = BufRd.ar(2, buf, pos, 0);
+        t_done = T2K.kr(pos >= (end-controlBlockFrames));
+        SendTrig.kr(Impulse.kr(cursorRate) * (1 - t_done), tid, pos); // cursor position
+        SendTrig.kr(t_done, tid+1, 1.0); // done signal
+        FreeSelf.kr(t_done * (1-loop));
+        Out.ar(out, sig * amp);
+      }).add;
+    };
+
+  }
+
 
   // utility function used when an active server is needed
   pr_checkServerAlive {|server, errorFunc|
@@ -524,13 +712,31 @@ SampleFile : SoundFile {
     };
   }
 
+  buffer { this.pr_checkBufferLoaded({^nil}); ^buffer }
+
 
   addTag {|tag| tags.add(tag) }
   hasTag {|tag| if(tag.isNil) { ^true } { ^tags.contains(tag) } }
 
   *isSoundFile {|path|
     if(path.class != PathName) { path = PathName.new(path) };
-    ^"^(wav[e]?|aif[f]?|raw)$".matchRegexp(path.extension.toLower);
+    ^"^(wav[e]?|aif[f]?)$".matchRegexp(path.extension.toLower);
+  }
+
+  event {|amp=0.5, startframe=0, endframe=(-1)|
+    var sdef;
+    this.pr_checkBufferLoaded({^nil});
+    sdef = if(this.numChannels == 2) { playdef2ch } { playdef1ch };
+    if(endframe == -1) { endframe = this.numFrames };
+    ^(instrument: sdef, amp: amp, start: startframe, end: endframe, buf: buffer.bufnum);
+  }
+
+  eventString {|amp=0.5, startframe=0, endframe=(-1)|
+    var sdef;
+    this.pr_checkBufferLoaded({^nil});
+    sdef = if(this.numChannels == 2) { playdef2ch } { playdef1ch };
+    if(endframe == -1) { endframe = this.numFrames };
+    ^"(instrument: '%', amp: %, start: %, end: %, buf: SampleLib.samples.at(\"%\").buffer)".format(sdef, amp, startframe, endframe, this.name);
   }
 
   /*
@@ -541,7 +747,7 @@ SampleFile : SoundFile {
     var newbuf, newaction;
     server = server ? Server.default;
     this.pr_checkServerAlive(server, { ^nil });
-    SampleFilePlayer.loadSynthDefs;
+    SampleFile.loadSynthDefs;
     newaction = action;
     if(buffer.notNil) { newaction.value(buffer) }
     { // allocate new buffer
@@ -552,7 +758,7 @@ SampleFile : SoundFile {
   }
 
   // Convenience method for loadFileIntoBuffer
-  load {|server, prepForPlayback=true, action| this.loadFileIntoBuffer(server, prepForPlayback, action) }
+  load {|server, action| this.loadFileIntoBuffer(server, action) }
 
   isLoaded {|server|
     server = server ? Server.default;
@@ -563,7 +769,10 @@ SampleFile : SoundFile {
   bufnum { ^buffer.bufnum }
   asString { ^("SampleFile"+path) }
 
-  getSamplePlayer {|server|
+  // cursor-linked view for gui interaction
+
+
+  getSampleFilePlayer {|server|
     this.pr_checkServerAlive(server, { ^nil });
     this.pr_checkBufferLoaded({^nil});
     ^SampleFilePlayer.new(this, server)
@@ -575,11 +784,6 @@ SampleFile : SoundFile {
         ^this.getSamplePlayer(server).play(out,startframe,endframe,amp)
     });
   }
-
-  play {|server, out=0, startframe=0, endframe=(-1), amp=1.0|
-    ^this.getSamplePlayer(server).play(out, startframe, endframe, amp);
-  }
-
 
 
 }

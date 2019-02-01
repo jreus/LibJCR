@@ -44,137 +44,203 @@ z = Scenes(f).makeGui;
 ________________________________________________________________*/
 
 Scenes {
-	var rootPath, scenePath, instancePath, sceneNames;
-	var win, onSelectOption=0;
-	*new {|scenedir|
-		^super.new.init(scenedir);
-	}
+  var <rootPath, <scenePath, <instancePath, <sceneNames;
+  var <win, <onSelectOption=0;
+  classvar <scenes, meters;
+
+  *new {|rootpath,scenedir|
+    ^super.new.init(rootpath,scenedir);
+  }
+
+  *meter {|server|
+    ^scenes.meter(server);
+  }
+
+  meter {|server|
+    var bnd, len;
+    server = server ? Server.default;
+    if(meters.isNil.or { meters.window.isClosed }) {
+      meters = server.meter;
+      meters.window.alwaysOnTop_(true).front;
+      bnd = meters.window.bounds;
+      len = Window.screenBounds.width - bnd.width;
+      meters.window.bounds = Rect(len, 0, bnd.width, bnd.height);
+    } {
+      meters.window.front;
+    };
+    ^meters;
+  }
 
   // should throw a fatal error if not being run from root.scd
-	init {|rootpath, scenedir|
-    if(rootpath.isNil) { // If rootpath is not specified then this method must be called from root.scd
-      if(PathName(Document.current.path).fileName != "root.scd") {
-        "Scenes.new must be called from 'root.scd', or a path to 'root.scd' must be provided".throw;
-      };
-      rootpath = Document.current.path;
-    };
-    rootPath = rootpath;
-		if(scenedir.isNil) { scenedir = rootpath.dirname +/+ "_scenes/" };
-		rootpath.postln;
-    scenedir.postln;
-		scenePath = scenedir;
-		if(File.exists(scenePath).not) {
-      File.mkdir(scenePath);
+  init {|rootpath, scenedir|
+    var thispath;
+    if(rootpath.isNil) {
+      rootpath = PathName(Document.current.path);
+    } {
+      rootpath = PathName(rootpath +/+ "root.scd");
     };
 
-    if(File.exists(rootPath).not) {
-      File.use(rootPath,"w", {|fp|
+    if(rootpath.isFile.not.or {rootpath.fileName != "root.scd"}) {
+        "Scenes must be initialized from 'root.scd', or a path to 'root.scd' must be provided".throw;
+    };
+    rootPath = rootpath.pathOnly;
+    if(scenedir.isNil) { scenedir = rootPath +/+ "_scenes/" };
+    scenePath = scenedir;
+    "Scenes root: %\nScenes dir: %\n".format(rootPath, scenePath).postln;
+
+    if(File.exists(scenePath).not) {
+      File.mkdir(scenePath);
+    };
+    if(File.exists(rootPath +/+ "root.scd").not) {
+      File.use(rootPath +/+ "root.scd","w", {|fp|
         fp.write("/*** Root Scene ***/\nMacros.load\n~sc=Scene.new\n")
       });
     };
-		sceneNames = (scenePath +/+ "*.scd").pathMatch.collect {|it|
-			PathName(it).fileNameWithoutExtension
-		};
-    "SCENE NAMES % %".format(sceneNames[0].class.postln, sceneNames).postln;
+    sceneNames = (scenePath +/+ "*.scd").pathMatch.collect {|it|
+      PathName(it).fileNameWithoutExtension
+    };
     sceneNames = sceneNames.insert(0, "root"); // root is a reserved scene name
-    "insert worked..".warn;
-		instancePath = scenePath +/+ "instances/";
-		if(File.exists(instancePath).not) { File.mkdir(instancePath) };
-	}
+    instancePath = scenePath +/+ "instances/";
+    if(File.exists(instancePath).not) { File.mkdir(instancePath) };
+  }
 
-	makeGui {|position|
-		var width = 200, height = 600, lineheight=20, top=0, left=0;
-		var styler, decorator, childView;
-		var sceneList, sceneName, addBtn, deleteBtn;
-		var subView, subStyler;
-		if(win.notNil) { win.close };
+  *startup {|server=nil, showScenes=true, showMeters=true, loadSamples=true, limitSamples=25000, rootpath=nil, scenedir=nil, onBoot=nil|
+    var win;
+    scenes = Scenes.new(rootpath, scenedir);
+
+    // Choose Audio Device, Boot Server, Load Macros, Synths & Samples
+    if(server.isNil) { server = Server.default };
+    // TODO: Also choose block size
+    win = Window.new("Choose Audio Device", Rect(400,500,200,200));
+    ListView.new(win, Rect(0, 0, 200, 200))
+    .items_(ServerOptions.devices.sort)
+    .mouseUpAction_({|lv|
+      "Using %\n".postf(lv.items[lv.value]);
+      server.options.device = lv.items[lv.value];
+      server.options.numInputBusChannels = 20;
+      server.options.numOutputBusChannels = 20;
+      server.options.memSize = 65536;
+      server.options.blockSize = 64;
+      server.options.numWireBufs = 512;
+      win.close;
+      server.waitForBoot {
+
+        if(showMeters) {
+        var bnd, len;
+        if(meters.notNil) { meters.window.close };
+        meters = server.meter;
+        meters.window.alwaysOnTop_(true).front;
+        bnd = meters.window.bounds;
+        len = Window.screenBounds.width - bnd.width;
+        meters.window.bounds = Rect(len, 0, bnd.width, bnd.height);
+        };
+
+        if(onBoot.isNil) {
+          var macrodir;
+          Syn.load;
+          Macros.load(scenes.rootPath +/+ "_macros/");
+          if(loadSamples) {
+            Smpl.load(server, limit: limitSamples, doneFunc: { if(showScenes) { scenes.makeGui } });
+          };
+        };
+      };
+    });
+    win.alwaysOnTop_(true).front;
+  }
+
+  makeGui {|position|
+    var width = 200, height = 400, lineheight=20, top=0, left=0;
+    var styler, decorator, childView;
+    var sceneList, sceneName, addBtn, deleteBtn;
+    var subView, subStyler;
+    if(win.notNil) { win.close };
     if(position.notNil) {
       top = position.y; left = position.x;
     };
     win = Window("Scene Navigator", Rect(left, top, (width+10), height));
-		styler = GUIStyler(win);
+    styler = GUIStyler(win);
 
-		// child view inside window, this is where all the gui views sit
-		childView = styler.getWindow("Scenes", win.view.bounds);
-		childView.decorator = FlowLayout(childView.bounds, 5@5);
+    // child view inside window, this is where all the gui views sit
+    childView = styler.getWindow("Scenes", win.view.bounds);
+    childView.decorator = FlowLayout(childView.bounds, 5@5);
 
-		sceneName = TextField.new(childView, width@lineheight);
-		sceneName.action = {|field| addBtn.doAction };
+    sceneName = TextField.new(childView, width@lineheight);
+    sceneName.action = {|field| addBtn.doAction };
 
-		addBtn = styler.getSizableButton(childView, "+", "+", lineheight@lineheight);
-		deleteBtn = styler.getSizableButton(childView, "-", "-", lineheight@lineheight);
+    addBtn = styler.getSizableButton(childView, "+", "+", lineheight@lineheight);
+    deleteBtn = styler.getSizableButton(childView, "-", "-", lineheight@lineheight);
 
-    sceneList = ListView(childView, width@(height/4))
-		.items_(sceneNames.asArray).value_(nil)
-		.stringColor_(Color.white).background_(Color.clear)
-		.hiliteColor_(Color.new(0.3765, 0.5922, 1.0000, 0.5));
+    sceneList = ListView(childView, width@(height/2))
+    .items_(sceneNames.asArray).value_(nil)
+    .stringColor_(Color.white).background_(Color.clear)
+    .hiliteColor_(Color.new(0.3765, 0.5922, 1.0000, 0.5));
 
-		addBtn.action = {|btn|
-			var idx, newscene = sceneName.value;
+    addBtn.action = {|btn|
+      var idx, newscene = sceneName.value;
       if(newscene == "root") {
         "'root' is a reserved scene name".error;
 
       } {
-			idx = sceneList.items.indexOfEqual(newscene);
-			if(idx.notNil) { // a scene by that name already exists
-				"A scene with the name % already exists".format(newscene).warn;
-			} { // create a new scene
-				var scenepath = scenePath +/+ newscene ++ ".scd";
-        "new file at % % %".format(scenepath, newscene, sceneName.value).postln;
-				File.use(scenepath, "w", {|fp| fp.write("/* New Scene % */".format(newscene)) });
-				sceneList.items = sceneList.items.add(newscene);
-			};
+        idx = sceneList.items.indexOfEqual(newscene);
+        if(idx.notNil) { // a scene by that name already exists
+          "A scene with the name % already exists".format(newscene).warn;
+        } { // create a new scene
+          var scenepath = scenePath +/+ newscene ++ ".scd";
+          "new file at % % %".format(scenepath, newscene, sceneName.value).postln;
+          File.use(scenepath, "w", {|fp| fp.write("/* New Scene % */".format(newscene)) });
+          sceneList.items = sceneList.items.add(newscene);
+        };
       };
-		};
+    };
 
-		deleteBtn.action = {|btn|
-			var dialog,tmp,bounds,warning,scene,scenepath;
-			scene = sceneList.items[sceneList.value];
+    deleteBtn.action = {|btn|
+      var dialog,tmp,bounds,warning,scene,scenepath;
+      scene = sceneList.items[sceneList.value];
       if(scene == "root") {
         "'root' cannot be deleted".error;
 
       } {
-			scenepath = scenePath +/+ scene ++ ".scd";
-			warning = "Delete %\nAre you sure?".format(scene);
-			bounds = Rect(win.bounds.left, win.bounds.top + 25, win.bounds.width, win.bounds.height);
-			dialog = Window.new("Confirm", bounds, false, false);
-			dialog.alwaysOnTop_(true);
-			dialog.view.decorator = FlowLayout.new(dialog.view.bounds);
-			StaticText.new(dialog, 200@40).string_(warning);
-			Button.new(dialog, 60@30).string_("Yes").action_({|btn|
-				var newitems;
-				newitems = sceneList.items.copy; newitems.removeAt(sceneList.value);
-				sceneList.items = newitems;
-				File.delete(scenepath);
-				"Delete %".format(sceneList.items[sceneList.value]).postln;
-				dialog.close;
-			});
-			Button.new(dialog, 60@30).string_("Cancel").action_({|btn|
-				"Abort".postln;
-				dialog.close;
-			});
-      dialog.front;
+        scenepath = scenePath +/+ scene ++ ".scd";
+        warning = "Delete %\nAre you sure?".format(scene);
+        bounds = Rect(win.bounds.left, win.bounds.top + 25, win.bounds.width, win.bounds.height);
+        dialog = Window.new("Confirm", bounds, false, false);
+        dialog.alwaysOnTop_(true);
+        dialog.view.decorator = FlowLayout.new(dialog.view.bounds);
+        StaticText.new(dialog, 200@40).string_(warning);
+        Button.new(dialog, 60@30).string_("Yes").action_({|btn|
+          var newitems;
+          newitems = sceneList.items.copy; newitems.removeAt(sceneList.value);
+          sceneList.items = newitems;
+          File.delete(scenepath);
+          "Delete %".format(sceneList.items[sceneList.value]).postln;
+          dialog.close;
+        });
+        Button.new(dialog, 60@30).string_("Cancel").action_({|btn|
+          "Abort".postln;
+          dialog.close;
+        });
+        dialog.front;
       };
-		};
+    };
 
 
-		subStyler = GUIStyler(childView); // styler for subwindow
+    subStyler = GUIStyler(childView); // styler for subwindow
     subView = subStyler.getWindow("Subwindow", width@(height/2)); // subwindow
 
-		sceneList.action_({ |lv| // action when selecting items in the scene list -> build the scene info view
-			var btn, radio, instanceList, loadInstanceFunc, newInstanceFunc, getInstanceNames;
-			var matching, scene, templatepath;
-			scene = lv.items[lv.value];
+    sceneList.action_({ |lv| // action when selecting items in the scene list -> build the scene info view
+      var btn, radio, instanceList, loadInstanceFunc, newInstanceFunc, getInstanceNames;
+      var matching, scene, templatepath;
+      scene = lv.items[lv.value];
       if(scene == "root") {
         templatepath = rootPath;
       } {
         templatepath = scenePath +/+ scene ++ ".scd";
       };
-			scene.postln;
+      scene.postln;
 
       // *** BUILD SCENE INFO WINDOW ***
       subView.removeAll; // remove views & layout for previous scene info window
-			subView.decorator = FlowLayout(subView.bounds);
+      subView.decorator = FlowLayout(subView.bounds);
 
       getInstanceNames = {|sceneName|
         (instancePath +/+ "*%.scd".format(sceneName)).pathMatch.sort.reverse.collect {|path|
@@ -218,8 +284,8 @@ Scenes {
 
       };
 
-			btn = styler.getSizableButton(subView, "open template", size: 90@lineheight);
-			btn.action = {|btn| Document.open(templatepath) };
+      btn = styler.getSizableButton(subView, "open template", size: 90@lineheight);
+      btn.action = {|btn| Document.open(templatepath) };
       btn = styler.getSizableButton(subView, "new instance", size: 90@lineheight);
       btn.action = {|btn| newInstanceFunc.(scene); instanceList.value_(0) };
 
@@ -250,10 +316,10 @@ Scenes {
 
       loadInstanceFunc.(onSelectOption);
 
-		}); // END SCENELIST ACTION
+    }); // END SCENELIST ACTION
 
     ^win.alwaysOnTop_(true).front;
-	}
+  }
 }
 
 
