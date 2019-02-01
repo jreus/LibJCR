@@ -39,91 +39,142 @@ r = Reaper.new("localhost", 8000);
 ********************************/
 
 
-Reaper {
-	var <tracksById, <tracksByName;
-	var oscfunc;
-	var <reaperAddr;
-	var <>verbose;
-
-	*new {arg host="localhost", port=8000, verbose=false;
-		^super.new.init(host, port, verbose);
-	}
-
-	/*
-	Open Reaper and create a SC instance of Reaper. This method assumes that you have a Reaper project file named SC.RPP
-	in the same directory as the active document.
-	Only works on OSX.
-
-	@param filepath  An optional filepath to the Reaper project file to open.
-
-	@return  A Reaper instance
-
-	@example
-	f = "".resolveRelative +/+ "MyReaper.RPP";
-	Reaper.open(f);
-
-	@todo
-	*/
-	*open {arg filepath=nil;
-		if(filepath.isNil) {
-			filepath = Document.current.dir +/+ "SC.RPP";
-		};
-
-		// Open Reaper..
-		("open -a Reaper64"+filepath).runInTerminal;
-
-		^this.new;
-	}
-
-	send {arg addr, val=nil;
-		"Sending Msg: % %".postf(addr, val);
-		reaperAddr.sendMsg(addr,val);
-	}
-
-	// Get track by id or name
-	track {arg id;
-		if(id.isInteger) {
-			^tracksById[id];
-		} {
-			^tracksByName[id];
-		};
-	}
+Rea {
+  classvar <tracksById, <tracksByName;
+  classvar <oscfunc;
+  classvar <reaperAddr;
+  classvar <>verbose;
+  classvar <midiToReaper; // MIDI endpoint
+  classvar <midiFromReaper;
+  classvar <oscToReaper; // OSC address
 
 
-	init {arg host, port, verbose_osc;
-		//tracksById = Array.newClear(64);
-		tracksById = Dictionary.new;
-		tracksByName = Dictionary.new;
-		reaperAddr = NetAddr(host, port);
+  // Set up MIDI connections & OSC responders
+  *init {
+    var midiout=nil;
+    MIDIClient.init;
+    // TODO: Make a source select popup window
+    MIDIClient.sources.do {|endpoint|
+      if((endpoint.device == "IAC Driver").and { endpoint.name == "To Reaper" }) {
+        midiout = endpoint;
+      };
+    };
+    if(midiout.isNil) {
+      "MIDI DEVICE NOT FOUND: IAC Driver - To Reaper".throw;
+    };
+    // connect midi input from reaper
+    //MIDIIn.connect(0, midiin);
+    midiToReaper = MIDIOut.newByName(midiout.device, midiout.name).latency_(Server.default.latency);
+    oscToReaper = NetAddr("localhost", 8000);
+  }
 
-		verbose = verbose_osc;
+  //***** Reaper/SC Control Commands *****//
 
-		// Set up the OSC listener
-		oscfunc = {arg msg, time, addr;
-			var matches, tnum, track, cmd, val;
+  // linear fade of track volume
+  *fadeTrack {|tracknum=0, from=0, to=1.0, dur=1|
+    { // The 0dB point in reaper is 0.716
+      from = from.ampdb.curvelin(-180, 0, 0.0, 0.716, -3.09);
+      to = to.ampdb.curvelin(-180, 0, 0.0, 0.716, -3.09);
+      Array.interpolation(100, from, to).do {|i|
+        oscToReaper.sendMsg("/track/%/volume".format(tracknum), i);
+        (dur/100).wait;
+      };
+    }.fork(AppClock);
+  }
 
-			//msg.postln;
-			matches = msg[0].asString.findRegexp("(/track/([0-9][0-9]?))[/]?([/A-Za-z0-9]*)");
+  // input is in bpm
+  *rampTempo {|clock, from=60, to=120, dur=1|
+    {
+      from = from / 60;
+      to = to / 60;
+      Array.interpolation(100, from, to).do {|i|
+        clock.tempo_(i);
+        (dur/100).wait;
+      };
+    }.fork(AppClock);
+  }
+  //*****END Reaper Control Commands *****//
 
-			if(matches.size > 2) {
-				tnum = matches[2][1].asInt;
-				cmd = matches[3][1];
-				val = msg[1];
-				// If a track doesn't exist by name or by number, create it
-				// parse the message, but let the track do that..
-				track = tracksById[tnum];
-				if(track.isNil) {
-					track = ReaperTrack.new(tnum, this);
-					tracksById[tnum] = track;
-				};
-				track.parseCmd(cmd, val);
 
-			};
 
-		};
 
-		thisProcess.addOSCRecvFunc(oscfunc);
-	}
+
+
+  /*
+  Open Reaper and create a SC instance of Reaper. This method assumes that you have a Reaper project file named SC.RPP
+  in the same directory as the active document.
+  Only works on OSX.
+
+  @param filepath  An optional filepath to the Reaper project file to open.
+
+  @return  A Reaper instance
+
+  @example
+  f = "".resolveRelative +/+ "MyReaper.RPP";
+  Reaper.open(f);
+
+  @todo
+  */
+  *open {arg filepath=nil;
+    if(filepath.isNil) {
+      filepath = Document.current.dir +/+ "SC.RPP";
+    };
+
+    // Open Reaper..
+    ("open -a Reaper64"+filepath).runInTerminal;
+
+    ^this.new;
+  }
+
+  send {arg addr, val=nil;
+    "Sending Msg: % %".postf(addr, val);
+    reaperAddr.sendMsg(addr,val);
+  }
+
+  // Get track by id or name
+  track {arg id;
+    if(id.isInteger) {
+      ^tracksById[id];
+    } {
+      ^tracksByName[id];
+    };
+  }
+
+
+  init {arg host, port, verbose_osc;
+    //tracksById = Array.newClear(64);
+    tracksById = Dictionary.new;
+    tracksByName = Dictionary.new;
+    reaperAddr = NetAddr(host, port);
+
+    verbose = verbose_osc;
+
+    // Set up the OSC listener
+    oscfunc = {arg msg, time, addr;
+      var matches, tnum, track, cmd, val;
+
+      //msg.postln;
+      matches = msg[0].asString.findRegexp("(/track/([0-9][0-9]?))[/]?([/A-Za-z0-9]*)");
+
+      if(matches.size > 2) {
+        tnum = matches[2][1].asInt;
+        cmd = matches[3][1];
+        val = msg[1];
+        // If a track doesn't exist by name or by number, create it
+        // parse the message, but let the track do that..
+        track = tracksById[tnum];
+        if(track.isNil) {
+          track = ReaperTrack.new(tnum, this);
+          tracksById[tnum] = track;
+        };
+        track.parseCmd(cmd, val);
+
+      };
+
+    };
+
+    thisProcess.addOSCRecvFunc(oscfunc);
+  }
 
 
 
@@ -134,44 +185,44 @@ Reaper {
 
 
 ReaperTrack {
-	var <params;
-	var fxunits;
-	var setup;
+  var <params;
+  var fxunits;
+  var setup;
 
-	*new {arg number, parentsetup;
-		^super.new.init(number, parentsetup);
-	}
+  *new {arg number, parentsetup;
+    ^super.new.init(number, parentsetup);
+  }
 
-	init {arg number, parentsetup;
-		setup = parentsetup;
-		params = Dictionary.new;
-		params["number"] = number;
-		fxunits = Dictionary.new;
-	}
+  init {arg number, parentsetup;
+    setup = parentsetup;
+    params = Dictionary.new;
+    params["number"] = number;
+    fxunits = Dictionary.new;
+  }
 
-	parseCmd {arg cmd, val;
-		if(cmd == "volume") {
-			params[cmd] = val;
-		};
-		if(cmd == "name") {
-			params[cmd] = val;
-			setup.tracksByName[val] = this;
-		};
-	}
+  parseCmd {arg cmd, val;
+    if(cmd == "volume") {
+      params[cmd] = val;
+    };
+    if(cmd == "name") {
+      params[cmd] = val;
+      setup.tracksByName[val] = this;
+    };
+  }
 
-	volume_ {arg val;
-		var addr;
-		val = val.clip(0,1);
-		params["volume"] = val;
-		addr = "/track/%/volume".format(params["number"]);
-		setup.send(addr, val);
-	}
+  volume_ {arg val;
+    var addr;
+    val = val.clip(0,1);
+    params["volume"] = val;
+    addr = "/track/%/volume".format(params["number"]);
+    setup.send(addr, val);
+  }
 
 
 }
 
 ReaperFX {
-	var params;
-	var parentTrack;
+  var params;
+  var parentTrack;
 }
 
