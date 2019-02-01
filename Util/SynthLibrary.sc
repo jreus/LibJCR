@@ -18,6 +18,28 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+Metadata Syntax:
+
+/*
+@synth
+@shortdesc Simple Sinosc
+@desc A monophonic sine oscillator with frequency and amp control.
+@types Pitched, Sinus
+*/
+(
+SynthDef('mysin', {|out=0, amp=1.0, freq=220, gate=1|
+  Out.ar(out, SinOsc.ar(freq) * amp * EnvGen.ar(Env.perc, gate, doneAction: 2));
+}).add;
+);
+
+/*
+@example mysin
+*/
+x = Synth('mysin');
+x.free;
+(instrument:'mysin', freq: "G4".notecps, dur: 3, amp: 0.5).play;
+
+
 ________________________________________________________________*/
 
 
@@ -25,8 +47,11 @@ ________________________________________________________________*/
 /*
 @class
 Manages a library of synth definitions.
-Ths SynthLibrary looks for synthdef files (written as plain SC expressions) in the 'SynthDefs' directory
-inside a provided library path.
+Ths SynthLibrary looks for synthdef files
+(written as plain SC expressions) in the
+'SynthDefs' directory inside a provided library path.
+
+SynthDefs must be defined using 'singlequote' symbol notation.
 
 @usage
 
@@ -38,7 +63,7 @@ Syn {
 	classvar <guiWindow;
 	classvar <allNames, <allTypes;
 
-	*load { | synthDefsPath, server |
+	*load { |synthDefsPath, server|
 		var sp;
 		if (synthDefsPath.isNil) {
 			path = 	"~/../Drive/DEV/SC_Synthesis/".asAbsolutePath; // put your synthdef library path here
@@ -64,23 +89,32 @@ Syn {
 			kw3 = kw3 + 4; // move indexes forward to the end of the line where .add; was found
 
 			// error checks
-			if(kw1.size != kw2.size || kw2.size != kw3.size) { // same number of @synth, SynthDef and .add; strings found.
-				"Syntax error in synthdefs library file % \nNumber of @synth tags and SynthDefs do not match.".format(filepath).throw;
+      if((kw1.size != kw2.size).or {kw2.size != kw3.size}) {
+        var err = "Syntax error in synthdefs library file % \nNumber of @synth tags and SynthDefs do not match.".format(filepath);
+        err.error; err.throw;
+        ^nil;
 			};
 
 			kw1.size.do {arg idx; // check order of keyword locations follows sequence: @synth -> SynthDef -> .add;
-				if ((kw1[idx] > kw2[idx]) || (kw2[idx] > kw3[idx])) {
-					"Syntax error in synthdefs library file % \nNumber of @synth tags and SynthDefs do not match.".format(filepath).throw;
+				if ((kw1[idx] > kw2[idx]).or{ kw2[idx] > kw3[idx] }) {
+					var err = "Syntax error in synthdefs library file % \nNumber of @synth tags and SynthDefs do not match.".format(filepath);
+          err.error; err.throw;
+          ^nil;
 				};
 			};
 
 			// interpret synthdefs and parse metadata
-			kw1.size.do {arg idx;
+      kw1.size.do {|idx|
 				var metatext, deftext, name, synthdesc, info;
-				metatext = fulltext[kw1[idx]..(kw2[idx]-5)];
+        metatext = fulltext[kw1[idx]..(kw2[idx]-5)];
 				deftext = fulltext[kw2[idx]..kw3[idx]];
-				name = deftext.findRegexp("SynthDef[(]['\]([A-Za-z0-9_]+)[']?")[1][1].asSymbol;
-				deftext.interpret; // interpret Synthdef & create SynthDesc, throws an error if the server is not running
+        name = deftext.findRegexp("SynthDef[(]['\]([A-Za-z0-9_]+)[']?");
+        if(name.size == 0) {
+          "Syntax error in SynthDef expression\nin %".format(filepath).throw;
+        };
+        name = name[1][1].asSymbol;
+        deftext.interpret; // interpret Synthdef & create SynthDesc, throws an error if the server is not running
+
 				synthdesc = SynthDescLib.global.synthDescs[name];
 				info = SynthInfo.new(synthdesc);
 				info.parseDocString(metatext, filepath);
@@ -89,6 +123,7 @@ Syn {
 			};
 			fileNames.add(PathName.new(filepath).fileName);
 		};
+
 		// Collect all types
 		allTypes = Set.new;
 		synthdefs.values.do {|sinfo|
@@ -108,7 +143,8 @@ Syn {
 		var decorator, styler, subStyler, childView, childDecorator, substyler;
 		var subView, btn, key, s_info;
 		var searchText, searchList, searchTypeDropdown1, searchTypeDropdown2;
-		var width=200, height=400, lineheight=20;
+		var width=300, height=400, lineheight=15;
+    var listheight=100, textheight=250;
 		var findFunc;
 		if(synthdefs.isNil) { this.load };
 
@@ -116,9 +152,8 @@ Syn {
 		if(guiWindow.notNil) { guiWindow.close };
 		guiWindow = Window("Synth Catalog", (width+20)@height);
 		styler = GUIStyler(guiWindow);
-		guiWindow.view.decorator = FlowLayout(guiWindow.view.bounds);
+		guiWindow.view.decorator = FlowLayout(guiWindow.view.bounds, 0@0, 0@0);
 		decorator = guiWindow.view.decorator;
-		decorator.margin = Point(5,5);
 
 		// Child window
 		childView = styler.getWindow("SynthDefs", guiWindow.view.bounds, scroll: true);
@@ -136,9 +171,10 @@ Syn {
 		.items_(allTypes.putFirst("--").asArray).stringColor_(Color.white)
 		.background_(Color.clear);
 
-    searchList = ListView(childView, width@200)
+    searchList = ListView(childView, width@listheight)
 		.items_(allNames.asArray)
 		.stringColor_(Color.white)
+    .font_(styler.font)
 		.background_(Color.clear)
 		.hiliteColor_(Color.new(0.3765, 0.5922, 1.0000, 0.5));
 
@@ -178,7 +214,7 @@ Syn {
 		};
 
 		subStyler = GUIStyler(childView);
-    subView = subStyler.getWindow("Subwindow", width@150);
+    subView = subStyler.getWindow("Subwindow", width@(lineheight+textheight));
 
 		searchList.action_({ |sbs| // action when selecting items in the search list
 			var key, s_info, btn, txt, extext, synthdef = sbs.items[sbs.value];
@@ -192,30 +228,29 @@ Syn {
 			s_info = synthdefs[synthdef];
 			key = s_info.name;
 
-			styler.getSizableText(subView, key.asString, 50, \left, 10);
+			btn = subStyler.getSizableButton(subView, key.asString, size: 100@lineheight);
+			btn.action = { |btn|
+				Synth(key);
+			};
 
 			btn = styler.getSizableButton(subView, "source", size: 50@lineheight);
 			btn.action = {|btn|
         [s_info, s_info.filePath].postln; Document.open(s_info.filePath);
 			};
 
-			btn = subStyler.getSizableButton(subView, key.asString, size: 100@lineheight);
-			btn.action = { |btn|
-				Synth(key);
-			};
 
-			btn = subStyler.getSizableButton(subView, "insert", size: 100@lineheight);
+			btn = subStyler.getSizableButton(subView, "insert", size: 40@lineheight);
 			btn.action = { |btn|
 				"Insert for %".format(key).postln;
 			};
 
-			btn = subStyler.getSizableButton(subView, "pattern", size: 100@lineheight);
+			btn = subStyler.getSizableButton(subView, "pattern", size: 40@lineheight);
 			btn.action = { |btn|
 				"Pattern for %".format(key).postln;
 			};
 
 
-			txt = subStyler.getTextEdit(subView, width@400);
+			txt = subStyler.getTextEdit(subView, width@textheight);
 			File.readAllString(s_info.filePath).split($@).do {|chunk,i|
 				var found = chunk.findRegexp("^example "++ key.asString ++"[\n][*][/][\n](.*)");
 				if(found != []) {

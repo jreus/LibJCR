@@ -152,6 +152,12 @@ JLog {
 //////////////////////////////////////////
 // Additional methods to existing core classes.
 
++ Synth {
+  gate {|val=0|
+    ^this.set(\gate, val);
+  }
+}
+
 + String {
 	notecps {
 		^this.notemidi.midicps;
