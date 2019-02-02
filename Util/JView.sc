@@ -75,7 +75,7 @@ RadioSetView : CompositeView {
   add {|text|
     var newbut, newtext;
     // add layout here...
-    newtext = StaticText(this, textWidth@radioWidth).string_(text)
+    newtext = StaticText(this, textWidth@(this.bounds.height)).string_(text)
     .stringColor_(this.traceColor).font_(font).align_(textAlign);
     newbut = RadioButton(this, radioWidth@radioWidth)
     .background_(Color.clear).traceColor_(traceColor);

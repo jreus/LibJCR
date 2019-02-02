@@ -44,19 +44,12 @@ z = Scenes(f).makeGui;
 ________________________________________________________________*/
 
 Scenes {
-  var <rootPath, <scenePath, <instancePath, <sceneNames;
-  var <win, <onSelectOption=0;
-  classvar <scenes, meters;
+  classvar <rootPath, <scenePath, <instancePath, <sceneNames;
+  classvar <win, <onSelectOption=0;
+  classvar <meters,<initialized=false;
 
-  *new {|rootpath,scenedir|
-    ^super.new.init(rootpath,scenedir);
-  }
 
   *meter {|server|
-    ^scenes.meter(server);
-  }
-
-  meter {|server|
     var bnd, len;
     server = server ? Server.default;
     if(meters.isNil.or { meters.window.isClosed }) {
@@ -72,7 +65,7 @@ Scenes {
   }
 
   // should throw a fatal error if not being run from root.scd
-  init {|rootpath, scenedir|
+  *init {|rootpath, scenedir|
     var thispath;
     if(rootpath.isNil) {
       rootpath = PathName(Document.current.path);
@@ -102,15 +95,16 @@ Scenes {
     sceneNames = sceneNames.insert(0, "root"); // root is a reserved scene name
     instancePath = scenePath +/+ "instances/";
     if(File.exists(instancePath).not) { File.mkdir(instancePath) };
+    initialized=true;
   }
 
   *startup {|server=nil, showScenes=true, showMeters=true, loadSamples=true, limitSamplesLocal=1000, limitSamplesGlobal=30000, rootpath=nil, scenedir=nil, onBoot=nil|
     var win;
-    scenes = Scenes.new(rootpath, scenedir);
+    this.init(rootpath, scenedir);
 
     // Choose Audio Device, Boot Server, Load Macros, Synths & Samples
     if(server.isNil) { server = Server.default };
-    // TODO: Also choose block size
+    // TODO: Also choose block size in device selector
     win = Window.new("Choose Audio Device", Rect(400,500,200,200));
     ListView.new(win, Rect(0, 0, 200, 200))
     .items_(ServerOptions.devices.sort)
@@ -138,14 +132,14 @@ Scenes {
         if(onBoot.isNil) {
           var macrodir;
           Syn.load;
-          Macros.load(scenes.rootPath +/+ "_macros/");
+          Macros.load(rootPath +/+ "_macros/");
           if(loadSamples) {
             Smpl.load(server,
-              localsampledir: scenes.rootPath +/+ "_samples/",
+              localsampledir: rootPath +/+ "_samples/",
               verbose: false,
               limitLocal: limitSamplesLocal,
               limitGlobal: limitSamplesGlobal,
-              doneFunc: { if(showScenes) { scenes.makeGui } });
+              doneFunc: { if(showScenes) { this.gui } });
           };
         };
       };
@@ -153,12 +147,39 @@ Scenes {
     win.alwaysOnTop_(true).front;
   }
 
-  makeGui {|position|
-    var width = 200, height = 400, lineheight=20, top=0, left=0;
+  *sceneExists {|name|
+    ^(sceneNames.notNil.and { sceneNames.any({|sc| sc==name}) });
+  }
+
+  *getInstancePathsForScene {|name|
+    if(this.sceneExists(name)) {
+      ^("%/*%.scd".format(instancePath, name).pathMatch);
+    };
+    ^nil;
+  }
+
+  *getInstanceNamesForScene {|name|
+    if(this.sceneExists(name)) {
+      ^("%/*%.scd".format(instancePath, name)
+        .pathMatch.sort.reverse
+        .collect {|path| PathName(path).fileName[..12] });
+    };
+    ^nil;
+  }
+
+  *gui {|position|
+    var width = 200, height = 600, lineheight=20, top=0, left=0;
     var styler, decorator, childView;
-    var sceneList, sceneName, addBtn, deleteBtn;
+    var sceneList, searchField;
+    var addBtn, deleteBtn, renameBtn;
     var subView, subStyler;
-    if(win.notNil) { win.close };
+
+    if(win.notNil) {
+      if(win.isClosed.not) {
+        win.front;
+        ^win;
+      };
+    };
     if(position.notNil) {
       top = position.y; left = position.x;
     };
@@ -166,14 +187,11 @@ Scenes {
     styler = GUIStyler(win);
 
     // child view inside window, this is where all the gui views sit
-    childView = styler.getWindow("Scenes", win.view.bounds);
-    childView.decorator = FlowLayout(childView.bounds, 5@5);
+    childView = styler.getView("Scenes", win.view.bounds, gap: 10@10);
 
-    sceneName = TextField.new(childView, width@lineheight);
-    sceneName.action = {|field| addBtn.doAction };
-
-    addBtn = styler.getSizableButton(childView, "+", "+", lineheight@lineheight);
-    deleteBtn = styler.getSizableButton(childView, "-", "-", lineheight@lineheight);
+    addBtn = styler.getSizableButton(childView, "add", size: 30@lineheight);
+    deleteBtn = styler.getSizableButton(childView, "del", size: 30@lineheight);
+    renameBtn = styler.getSizableButton(childView, "rename", size: 40@lineheight);
 
     sceneList = ListView(childView, width@(height/2))
     .items_(sceneNames.asArray).value_(nil)
@@ -181,21 +199,28 @@ Scenes {
     .hiliteColor_(Color.new(0.3765, 0.5922, 1.0000, 0.5));
 
     addBtn.action = {|btn|
-      var idx, newscene = sceneName.value;
-      if(newscene == "root") {
-        "'root' is a reserved scene name".error;
-
-      } {
-        idx = sceneList.items.indexOfEqual(newscene);
-        if(idx.notNil) { // a scene by that name already exists
-          "A scene with the name % already exists".format(newscene).warn;
-        } { // create a new scene
-          var scenepath = scenePath +/+ newscene ++ ".scd";
-          "new file at % % %".format(scenepath, newscene, sceneName.value).postln;
-          File.use(scenepath, "w", {|fp| fp.write("/* New Scene % */".format(newscene)) });
-          sceneList.items = sceneList.items.add(newscene);
-        };
-      };
+      var idx, newscene;
+      styler.makeModalTextEntryDialog("Add Scene", "",
+        "new_scene", "Add", "Cancel",
+        yesAction:{|txt|
+          if(txt == "root") {
+            "'root' is a reserved scene name".error;
+          } {
+            var idx;
+            idx = sceneList.items.indexOfEqual(txt);
+            if(idx.notNil) {//a scene with that name exists
+              "FAILURE: A scene named % already exists".format(txt).warn;
+            } { // create a new scene
+              var path = scenePath +/+ txt ++ ".scd";
+              File.use(path, "w", {|fp|
+                fp.write("/* Scene % */".format(txt));
+                "Scn: created new scene template at %".format(path).postln;
+              });
+              sceneList.items = sceneList.items.add(txt);
+            };
+          };
+        },
+        noAction:{|txt| "Abort Add".postln });
     };
 
     deleteBtn.action = {|btn|
@@ -203,37 +228,81 @@ Scenes {
       scene = sceneList.items[sceneList.value];
       if(scene == "root") {
         "'root' cannot be deleted".error;
-
       } {
+        // TODO: need to close scene windows if they are open
         scenepath = scenePath +/+ scene ++ ".scd";
-        warning = "Delete %\nAre you sure?".format(scene);
-        bounds = Rect(win.bounds.left, win.bounds.top + 25, win.bounds.width, win.bounds.height);
-        dialog = Window.new("Confirm", bounds, false, false);
-        dialog.alwaysOnTop_(true);
-        dialog.view.decorator = FlowLayout.new(dialog.view.bounds);
-        StaticText.new(dialog, 200@40).string_(warning);
-        Button.new(dialog, 60@30).string_("Yes").action_({|btn|
-          var newitems;
-          newitems = sceneList.items.copy; newitems.removeAt(sceneList.value);
-          sceneList.items = newitems;
-          File.delete(scenepath);
-          "Delete %".format(sceneList.items[sceneList.value]).postln;
-          dialog.close;
+        warning = "Delete '%'\nAre you sure?".format(scene);
+        styler.makeModalConfirmDialog(
+          "Confirm Delete",
+          warning, "Yes", "Cancel",
+          yesAction: {
+            var newitems;
+            newitems = sceneList.items.copy;
+            newitems.removeAt(sceneList.value);
+            sceneList.items = newitems;
+            File.delete(scenepath);
+            "Delete % at %".format(scene, scenepath).postln;
+            // TODO:: Don't delete, instead move template & any instances to the bin
+          },
+          noAction: {
+            "Abort Delete".postln;
         });
-        Button.new(dialog, 60@30).string_("Cancel").action_({|btn|
-          "Abort".postln;
-          dialog.close;
-        });
-        dialog.front;
+
       };
+    };
+
+    renameBtn.action = {|btn|
+      var scene, msg;
+      scene = sceneList.items[sceneList.value];
+      if(scene == "root") {
+        "'root' cannot be renamed".error;
+      } {
+        msg = "Enter a new name for '%'".format(scene);
+        styler.makeModalTextEntryDialog("Rename Scene",
+          msg, scene,
+          "Rename", "Cancel",
+          yesAction: {|newname|
+            var newlist, oldpath, newpath, oldinstancepaths, newinstancepaths;
+            oldpath = scenePath +/+ scene ++ ".scd";
+            newpath = scenePath +/+ newname ++ ".scd";
+            if(File.exists(newpath)) {
+              "a scene named '%' already exists".format(newname).error;
+            } {
+              // TODO: need to close old scene windows if they are open
+              oldinstancepaths = this.getInstancePathsForScene(scene);
+              newinstancepaths = oldinstancepaths.collect {|path|
+                path.replace(scene ++ ".scd", newname ++ ".scd");
+              };
+
+              // rename template
+              File.copy(oldpath, newpath);
+              File.delete(oldpath);
+
+              // rename/move instances
+              oldinstancepaths.do {|oldpath, idx|
+                File.copy(oldpath, newinstancepaths[idx]);
+                File.delete(oldpath);
+              };
+
+              "Scn: scene % renamed to % at %".format(scene,newname,newpath).postln;
+
+              // refresh list
+              newlist = sceneList.items.replace([scene],[newname]);
+              sceneList.items = newlist;
+            };
+          },
+          noAction: {|newname| "Scn: abort rename".postln });
+      };
+
     };
 
 
     subStyler = GUIStyler(childView); // styler for subwindow
-    subView = subStyler.getWindow("Subwindow", width@(height/2)); // subwindow
+    subView = subStyler.getView("Subwindow", Rect(0,0,width,height/2)); // subwindow
 
-    sceneList.action_({ |lv| // action when selecting items in the scene list -> build the scene info view
-      var btn, radio, instanceList, loadInstanceFunc, newInstanceFunc, getInstanceNames;
+    // SCENELIST ACTION (on selection)
+    sceneList.action_({ |lv|
+      var btn, radio, instanceList, loadInstanceFunc, newInstanceFunc;
       var matching, scene, templatepath;
       scene = lv.items[lv.value];
       if(scene == "root") {
@@ -241,23 +310,17 @@ Scenes {
       } {
         templatepath = scenePath +/+ scene ++ ".scd";
       };
-      scene.postln;
+      "select % %".format(scene,templatepath).postln;
 
       // *** BUILD SCENE INFO WINDOW ***
       subView.removeAll; // remove views & layout for previous scene info window
       subView.decorator = FlowLayout(subView.bounds);
 
-      getInstanceNames = {|sceneName|
-        (instancePath +/+ "*%.scd".format(sceneName)).pathMatch.sort.reverse.collect {|path|
-          PathName(path).fileName[..12];
-        };
-      };
-
       newInstanceFunc = {|sceneName|
         var res, instances;
         res = instancePath +/+ Date.getDate.stamp ++ "_" ++ sceneName ++ ".scd";
         File.use(res, "w", {|fp| fp.write(File.readAllString(scenePath +/+ sceneName ++ ".scd")) });
-        instances = getInstanceNames.(sceneName);
+        instances = this.getInstanceNamesForScene(sceneName);
         instanceList.items_(instances).refresh;
         res;
       };
@@ -294,21 +357,24 @@ Scenes {
       btn = styler.getSizableButton(subView, "new instance", size: 90@lineheight);
       btn.action = {|btn| newInstanceFunc.(scene); instanceList.value_(0) };
 
+      styler.getHorizontalSpacer(subView, width-20);
+      styler.getSizableText(subView, "Load on selection", width-20);
+
       // Radiobuttons
       // No Auto Loading
       // Auto Load Latest Instance
       // Auto Load New Instance (if latest is older than x days)
-      radio = RadioSetView(subView, width@50).font_(subStyler.font).textWidth_(100).radioWidth_(10);
-      radio.add("no load");
-      radio.add("last instance");
-      radio.add("new instance");
+      radio = RadioSetView(subView, (width)@lineheight).font_(subStyler.font).textWidth_(40).radioWidth_(lineheight).traceColor_(subStyler.stringColor).background_(subStyler.backgroundColor).textAlign_(\center);
+      radio.add("none");
+      radio.add("last inst");
+      radio.add("new inst");
       radio.setSelected(onSelectOption);
       radio.action_({|vw,idx| onSelectOption = idx });
 
 
       // Instance List
-      instanceList = ListView(subView, width@100)
-      .items_(getInstanceNames.(scene))
+      instanceList = ListView(subView, (width-20)@100)
+      .items_(this.getInstanceNamesForScene(scene))
       .value_(nil).stringColor_(Color.white).background_(Color.clear)
       .hiliteColor_(Color.new(0.3765, 0.5922, 1.0000, 0.5)).font_(subStyler.font);
 
