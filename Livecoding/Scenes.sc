@@ -104,7 +104,7 @@ Scenes {
     if(File.exists(instancePath).not) { File.mkdir(instancePath) };
   }
 
-  *startup {|server=nil, showScenes=true, showMeters=true, loadSamples=true, limitSamples=25000, rootpath=nil, scenedir=nil, onBoot=nil|
+  *startup {|server=nil, showScenes=true, showMeters=true, loadSamples=true, limitSamplesLocal=1000, limitSamplesGlobal=30000, rootpath=nil, scenedir=nil, onBoot=nil|
     var win;
     scenes = Scenes.new(rootpath, scenedir);
 
@@ -140,7 +140,12 @@ Scenes {
           Syn.load;
           Macros.load(scenes.rootPath +/+ "_macros/");
           if(loadSamples) {
-            Smpl.load(server, limit: limitSamples, doneFunc: { if(showScenes) { scenes.makeGui } });
+            Smpl.load(server,
+              localsampledir: scenes.rootPath +/+ "_samples/",
+              verbose: false,
+              limitLocal: limitSamplesLocal,
+              limitGlobal: limitSamplesGlobal,
+              doneFunc: { if(showScenes) { scenes.makeGui } });
           };
         };
       };

@@ -1,5 +1,5 @@
 /*_____________________________________________________________
-SampleLib.sc
+Smpl.sc
 
 Sample library manager and buffer utilities
 
@@ -37,16 +37,15 @@ Features / Todos
 /******************************************************************
 
 @usage
-SampleLib
 
-SampleLib.lazyLoadGlobal = false;
-SampleLib.lazyLoadLocal = true;
-SampleLib.load(verbose: true); // loads global & local sample libraries
+Smpl.lazyLoadGlobal = false;
+Smpl.lazyLoadLocal = true;
+Smpl.load(verbose: true); // loads global & local sample libraries
 
-SampleLib.at("drum001"); // get sample by id, or search library by various functions
+Smpl.at("drum001"); // get sample by id, or search library by various functions
 // e.g. by type, by directory, etc..
 
-SampleLib.gui; // open gui editor
+Smpl.gui; // open gui editor
 
 *******************************************************************/
 
@@ -88,8 +87,8 @@ Smpl {
   // By default will look for a local '_samples' directory in the same directory as the current document.
   // A global samples directory will be searched for at globalSamplesPath
   // If a server is not provided, server will be the default server.
-  *load {|server=nil,localsampledir=nil,verbose=false,limit=nil,doneFunc=nil|
-    var samplePath;
+  *load {|server=nil,localsampledir=nil,verbose=false, limitLocal=nil, limitGlobal=nil, doneFunc=nil|
+    var samplePath, loaded;
     activeServer = server;
     this.pr_checkServerAlive({^nil});
 
@@ -98,13 +97,16 @@ Smpl {
     if(File.exists(localSamplesPath).not) { File.mkdir(localSamplesPath) };
     if(File.exists(globalSamplesPath).not) { File.mkdir(globalSamplesPath) };
 
-    // Load samples from global & local paths
-    "\n... Loading Global Samples ... %".format(globalSamplesPath).postln;
-    samplePath = PathName.new(globalSamplesPath);
-    this.pr_loadSamples(samplePath, lazyLoadGlobal, verbose, limit);
-    "\n... Loading Local Samples ... %".format(localSamplesPath).postln;
+    // Load samples from local & global paths
+    "\nSmpl: Loading Local Samples at %".format(localSamplesPath).postln;
     samplePath = PathName.new(localSamplesPath);
-    this.pr_loadSamples(samplePath, lazyLoadLocal, verbose, limit);
+    loaded = this.pr_loadSamples(samplePath, lazyLoadLocal, verbose, limitLocal);
+    "Smpl: % samples loaded".format(loaded).postln;
+
+    "\nSmpl: Loading Global Samples at %".format(globalSamplesPath).postln;
+    samplePath = PathName.new(globalSamplesPath);
+    loaded = this.pr_loadSamples(samplePath, lazyLoadGlobal, verbose, limitGlobal);
+    "Smpl: % samples loaded".format(loaded).postln;
 
     // Collect groups and tags
     allGroups = Set.new;
@@ -117,13 +119,13 @@ Smpl {
 
     allGroups = allGroups.asList.sort;
     allTags = allTags.asList.sort;
-    "\n... Finished Loading % Samples ...".format(samples.size).postln;
+    "\nSmpl: Library loaded % samples".format(samples.size).postln;
     if(doneFunc.notNil) { doneFunc.value() };
   }
 
   // private method
   *pr_loadSamples {|samplePath, lazyLoad, verbose, limit|
-    var res;
+    var res, tmplim = limit;
     res = block {|break|
       samplePath.filesDo {|path,i|
         var sf; // samplefile
@@ -132,17 +134,21 @@ Smpl {
         sf = SampleFile.openRead(path);
 
         if(sf.notNil) {
-          //[sf.duration, sf.headerFormat, sf.sampleFormat, sf.numFrames, sf.numChannels, sf.sampleRate, path.folderName, path.extension, path.fileName, sf.path].postln;
-
           id = path.fileNameWithoutExtension.replace(" ","");
           if(samples.at(id).notNil) {
               if(samples.at(id).path != sf.path) {
               // if paths are equal, the sample has already been loaded
-              id = "%-$".format(sf.folderGroups.last.replace(" ","_"), id);
+              id = "%_%".format(sf.folderGroups.last.replace(" ","_"), id);
               };
           };
 
-          if(limit.notNil.and({samples.at(id).isNil}).and {samples.size >= limit}) { break.value(\limit) };
+          if(limit.notNil) {
+            if(samples.at(id).isNil.and {limit <= 0}) {
+              break.value(\limit)
+            } {
+              limit = limit-1;
+            };
+        };
           sf.name = id;
           samples.put(id, sf);
           groupId = path.folderName.asSymbol;
@@ -170,8 +176,9 @@ Smpl {
     };
     "".postln;
     if(res == \limit) {
-      "Sample limit % reached, some samples were not loaded".format(limit).warn;
-    }
+      "limit % reached, some samples were not loaded".format(tmplim).warn;
+    };
+    ^(tmplim - limit);
   }
 
   // When lazyloading is active, preload lets you preload groups of samples
@@ -336,7 +343,7 @@ Smpl {
           insertButton.action_({|btn|
             var doc = Document.current;
             doc.insertAtCursor(
-              "SampleLib.samples.at(\"%\")".format(sf.name)
+              "Smpl.samples.at(\"%\")".format(sf.name)
             );
           });
 
@@ -533,7 +540,7 @@ SampleFileView : CompositeView {
 
 SampleFile : SoundFile {
 
-  // SampleLib Plumbing
+  // Smpl Plumbing
   classvar rootFolder = "_samples";
 
   // ** Playback **
@@ -736,7 +743,7 @@ SampleFile : SoundFile {
     this.pr_checkBufferLoaded({^nil});
     sdef = if(this.numChannels == 2) { playdef2ch } { playdef1ch };
     if(endframe == -1) { endframe = this.numFrames };
-    ^"(instrument: '%', amp: %, start: %, end: %, buf: SampleLib.samples.at(\"%\").buffer)".format(sdef, amp, startframe, endframe, this.name);
+    ^"(instrument: '%', amp: %, start: %, end: %, buf: Smpl.samples.at(\"%\").buffer)".format(sdef, amp, startframe, endframe, this.name);
   }
 
   /*
