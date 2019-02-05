@@ -209,7 +209,7 @@ Smpl {
   }
 
 
-  *gui {
+  *gui {|alwaysOnTop=false|
     var styler, subStyler, decorator, childView, childDecorator, subView;
     var searchText, searchList, autoPlayCB, txt;
     var searchGroupDropdown, searchTagDropdown;
@@ -227,7 +227,7 @@ Smpl {
     win.view.decorator.margin = 0@0;
 
     // Scrollable Inner View
-    childView = styler.getWindow("SubView", win.view.bounds, scroll: false);
+    childView = styler.getView("SubView", win.view.bounds, scroll: false);
     childView.decorator = FlowLayout(childView.bounds);
     childDecorator = decorator;
 
@@ -287,7 +287,7 @@ Smpl {
 
     // Context-Dependent Sub-window
     subStyler = GUIStyler(childView); // configure substyler...?
-    subView = subStyler.getWindow("Sample Info", width@subWinHeight, scroll: true);
+    subView = subStyler.getView("Sample Info", Rect(0,0,width,subWinHeight), scroll: true);
 
     searchList.mouseUpAction_({|sl|
       if(subView.children.size == 0) { // a rare case, when after a search there is no active subview
@@ -349,7 +349,7 @@ Smpl {
 
           // insert a playable event into the IDE
           insertEventBtn.action_({|btn|
-            var doc, insertString = sfview.getEventStringForCurrentSelection;
+            var doc, insertString = "\n%\n".format(sfview.getEventStringForCurrentSelection);
             doc = Document.current;
             doc.insertAtCursor(insertString);
           });
@@ -387,7 +387,7 @@ Smpl {
 
     });
 
-    win.front;
+    win.front.alwaysOnTop_(alwaysOnTop);
   }
 
 }

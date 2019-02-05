@@ -177,6 +177,27 @@ JLog {
   //postf {|...args| ^this.format(*args).postln; }
 }
 
++ SequenceableCollection {
+
+  // to frequency & midi note
+  f {
+    ^this.collect(_.f);
+  }
+
+  m {
+    ^this.collect(_.m);
+  }
+
+  pseq {|rep=inf, off=0|
+    ^Pseq(this,rep,off);
+  }
+
+  prand {|rep=inf|
+    ^Prand(this, rep);
+  }
+
+}
+
 + Symbol {
 	notecps {
 		^this.asString.notecps;

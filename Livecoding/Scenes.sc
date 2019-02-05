@@ -173,6 +173,7 @@ Scenes {
     var sceneList, searchField;
     var addBtn, deleteBtn, renameBtn;
     var subView, subStyler;
+    var lastClick = Process.elapsedTime;
 
     if(win.notNil) {
       if(win.isClosed.not) {
@@ -300,13 +301,30 @@ Scenes {
     subStyler = GUIStyler(childView); // styler for subwindow
     subView = subStyler.getView("Subwindow", Rect(0,0,width,height/2)); // subwindow
 
+
+    // SCENELIST DoubleClick Action
+    sceneList.mouseUpAction = {
+      var templatepath, scene, thresh = 0.3, now = Process.elapsedTime;
+      if((now - lastClick) < thresh) {
+        // Open Source
+        scene = sceneList.items[sceneList.value];
+        if(scene == "root") {
+          templatepath = rootPath +/+ "root.scd";
+        } {
+          templatepath = scenePath +/+ scene ++ ".scd";
+        };
+        Document.open(templatepath);
+      };
+      lastClick = now;
+    };
+
     // SCENELIST ACTION (on selection)
     sceneList.action_({ |lv|
       var btn, radio, instanceList, loadInstanceFunc, newInstanceFunc;
       var matching, scene, templatepath;
       scene = lv.items[lv.value];
       if(scene == "root") {
-        templatepath = rootPath;
+        templatepath = rootPath +/+ "root.scd";
       } {
         templatepath = scenePath +/+ scene ++ ".scd";
       };

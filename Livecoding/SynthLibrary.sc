@@ -150,15 +150,12 @@ Syn {
 
 		// Master window
 		if(guiWindow.notNil) { guiWindow.close };
-		guiWindow = Window("Synth Catalog", (width+20)@height);
+    guiWindow = Window("Synth Catalog", Rect(0,0,(width+20), height));
 		styler = GUIStyler(guiWindow);
-		guiWindow.view.decorator = FlowLayout(guiWindow.view.bounds, 0@0, 0@0);
-		decorator = guiWindow.view.decorator;
 
 		// Child window
-		childView = styler.getWindow("SynthDefs", guiWindow.view.bounds, scroll: true);
-		childView.decorator = FlowLayout(childView.bounds);
-		childDecorator = decorator;
+		childView = styler.getView("SynthDefs", guiWindow.view.bounds, scroll: true);
+		//childDecorator = decorator;
 
 		// Search
 		searchText = TextField(childView, width@lineheight);
@@ -214,7 +211,7 @@ Syn {
 		};
 
 		subStyler = GUIStyler(childView);
-    subView = subStyler.getWindow("Subwindow", width@(lineheight+textheight));
+    subView = subStyler.getView("Subwindow", Rect(0,0,width, lineheight+textheight));
 
 		searchList.action_({ |sbs| // action when selecting items in the search list
 			var key, s_info, btn, txt, extext, synthdef = sbs.items[sbs.value];
