@@ -118,7 +118,7 @@ Scenes {
       server.options.numWireBufs = 512;
       win.close;
       server.waitForBoot {
-
+        var macrodir;
         if(showMeters) {
         var bnd, len;
         if(meters.notNil) { meters.window.close };
@@ -129,21 +129,20 @@ Scenes {
         meters.window.bounds = Rect(len, 0, bnd.width, bnd.height);
         };
 
-        if(onBoot.isNil) {
-          var macrodir;
-          Syn.load;
-          Macros.load(rootPath +/+ "_macros/");
-          if(loadSamples) {
+        Syn.load;
+        Macros.load(rootPath +/+ "_macros/");
+        if(loadSamples) {
             Smpl.load(server,
               localsampledir: rootPath +/+ "_samples/",
               verbose: false,
               limitLocal: limitSamplesLocal,
               limitGlobal: limitSamplesGlobal,
               doneFunc: { if(showScenes) { this.gui } });
-          };
         };
+
+        if(onBoot.notNil) { onBoot.value };
       };
-    });
+      });
     win.alwaysOnTop_(true).front;
   }
 
