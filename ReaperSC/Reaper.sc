@@ -6,6 +6,12 @@ Control Reaper from SuperCollider
 jonathanreus.com
 info@jonathanreus.com
 
+MORE INFO ON REAPER OSC CONTROL CAN BE FOUND HERE:
+
+
+
+
+
 TODO:
 
 Most of the track parameters like number, select, mute, solo, pan,
@@ -22,6 +28,9 @@ Feature Requests from Reaper devs:
 - a way for the ctrl surface to ping Reaper for the most updated track info
 - OSC method for creating new effects by name on a track
 - OSC actions with arguments
+
+
+
 
 *******************************************/
 
@@ -40,7 +49,7 @@ r = Reaper.new("localhost", 8000);
 
 
 Rea {
-  classvar <tracksById, <tracksByName;
+  classvar <>tracksById, <>tracksByName, <>tracks;
   classvar <oscfunc;
   classvar <reaperAddr;
   classvar <>verbose;
@@ -66,13 +75,23 @@ Rea {
     //MIDIIn.connect(0, midiin);
     midiToReaper = MIDIOut.newByName(midiout.device, midiout.name).latency_(Server.default.latency);
     oscToReaper = NetAddr("localhost", 8000);
+
+    tracksByName = Dictionary.new;
+    tracks = Dictionary.new;
+    tracksById = Array.newClear(30);
   }
+
+  *tr {|name| ^tracks[name] }
+  *tr_ {|name, val| tracks[name] = val }
 
   //***** Reaper/SC Control Commands *****//
 
   // linear fade of track volume
+  // track 0 is the master track
   *fadeTrack {|tracknum=0, from=0, to=1.0, dur=1|
-    { // The 0dB point in reaper is 0.716
+    {
+      // convert from linear float amplitude to Reaper DB
+      // The 0dB point in reaper is 0.716
       from = from.ampdb.curvelin(-180, 0, 0.0, 0.716, -3.09);
       to = to.ampdb.curvelin(-180, 0, 0.0, 0.716, -3.09);
       Array.interpolation(100, from, to).do {|i|
@@ -82,6 +101,30 @@ Rea {
     }.fork(AppClock);
   }
 
+  *pan {|tracknum=0, from=0.0, to=0.0, dur=1|
+    {
+    // scale from SC panning to reaper panning (centered at 0.5)
+    from = from.linlin(-1.0, 1.0, 0.0, 1.0);
+    to = to.linlin(-1.0, 1.0, 0.0, 1.0);
+      Array.interpolation(100, from, to).do {|i|
+        oscToReaper.sendMsg("/track/%/pan".format(tracknum), i);
+        (dur/100).wait;
+      };
+    }.fork(AppClock);
+  }
+
+  *bypassFx {|tracknum=0, fxnum=0, bypassval=1.0|
+    oscToReaper.sendMsg("/track/%/fx/%/bypass".format(tracknum, fxnum), bypassval);
+  }
+
+  *mute {|tracknum=0, muteval=1|
+    oscToReaper.sendMsg("/track/%/mute".format(tracknum), muteval);
+  }
+
+  *tempo {|bpm=120|
+    oscToReaper.sendMsg("/tempo/raw", bpm);
+  }
+
   // input is in bpm
   *rampTempo {|clock, from=60, to=120, dur=1|
     {
@@ -89,6 +132,7 @@ Rea {
       to = to / 60;
       Array.interpolation(100, from, to).do {|i|
         clock.tempo_(i);
+        oscToReaper.sendMsg("/tempo/raw", i * 60);
         (dur/100).wait;
       };
     }.fork(AppClock);

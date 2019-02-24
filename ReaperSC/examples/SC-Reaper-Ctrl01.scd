@@ -184,29 +184,16 @@ thisProcess.addOSCRecvFunc(f);
 
 
 
+// Panning also works
+Rea.oscToReaper.sendMsg("/track/2/pan", 0.5)
 
-// Using Reaper class....
-
-r = Reaper.new();
-
-r.reaperAddr
-r.tracksById
-r.tracksByName
-
-r.tracksById[3].params
-r.tracksByName['Test 3'].params
-r.tracksByName['Jay'].params
-
-z = Dictionary.new;
-
-// sets the volume in reaper
-r.tracksById[3].volume_(0.7);
-r.tracksByName['Test 2'].volume_(0.2);
+Rea.panTrack(2, -1, 0, 4);
+Rea.muteTrack(2, 0);
 
 
+Rea.tracksById
 
-
-
+Rea.panTrack()
 
 
 
