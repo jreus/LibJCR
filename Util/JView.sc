@@ -98,33 +98,71 @@ RadioButton : UserView {
   var <>traceColor, <>inset=0.2;
   var <>selected=false;
   var <>action;
+  var <>display = \radio;
 
-  *new {|parent, bounds|
-    ^super.new(parent, bounds).init;
+  // display types
+  // \radio \x \check
+
+  *new {|parent, bounds, type=\radio|
+    ^super.new(parent, bounds).init(type);
   }
 
-  init {
+  init {|type|
+    this.display = type;
     this.background = Color.grey(0.1);
     this.traceColor = Color.gray(0.9);
     this.drawFunc_({|vw|
       var width, height, inw, inh;
       width = vw.bounds.width;
       height = vw.bounds.height;
-
+      inw = inset*width; inh = inset*height;
       Pen.use {
         Pen.color = this.background;
         Pen.addRect(vw.bounds);
         Pen.fill;
+        switch(display,
+          \radio, {
+            Pen.color = this.traceColor;
+            Pen.addOval(Rect(0,0,width,height));
+            Pen.stroke;
 
-        Pen.color = this.traceColor;
-        Pen.addOval(Rect(0,0,width,height));
-        Pen.stroke;
+            if(selected) {
+              Pen.addOval(Rect(inw,inh,width-(2*inw),height-(2*inh)));
+              Pen.fill;
+            };
 
-        if(selected) {
-          inw = inset*width; inh = inset*height;
-          Pen.addOval(Rect(inw,inh,width-(2*inw),height-(2*inh)));
-          Pen.fill;
-        };
+          },
+
+          \x, {
+            Pen.color = this.traceColor;
+            Pen.addOval(Rect(0,0,width,height));
+            Pen.stroke;
+
+            if(selected) {
+              Pen.width_(width/20 + 1);
+              Pen.line((width/5)@(height/5), (width/1.2)@(height/1.25));
+              Pen.line((width/5)@(height/1.2), (width/1.2)@(height/5));
+              Pen.stroke;
+            };
+
+          },
+          \check, {
+            inw = inw * 0.4; inh = inh * 0.4;
+            Pen.color = this.traceColor;
+            Pen.addRect(Rect(inw,inh,width-(2*inw),height-(2*inh)));
+            Pen.stroke;
+
+            if(selected) {
+              Pen.width_(width/20 + 1);
+
+              Pen.line(0@(height/3), (width/2)@(height/1.1));
+              Pen.line((width/2)@(height/1.1), width@0);
+              Pen.stroke;
+            };
+
+          }
+        );
+
       };
     });
 
