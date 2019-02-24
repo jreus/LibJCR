@@ -37,6 +37,11 @@ Gest {
     }}.fork(AppClock);
   }
 
+  // Amplitude fade on synth-like object
+  *fade {|synth, from=1.0, to=0.0, dur=1, res=100|
+    Gest.lin({|val| synth.set(\amp, val)}, from, to, dur, res);
+  }
+
 }
 
 
