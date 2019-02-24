@@ -20,14 +20,40 @@ along with this program.  If not, see http://www.gnu.org/licenses/
 ________________________________________________________________*/
 
 
+
+
 /*-------------------------------------------------
 Features / Todos
-* selectable playback region option in gui
-* ability to add markers in gui
+* sort by # channels and sample rate and length range in Smpl
 * ability to add tags in gui
 * ability to save & load tags and markers in metadata files
 * a compact syntax for playing samples inside functions & routines
 * similar to say2 for speech. e.g. to be able to be used easily in a composition / scheduling system
+
+
+
+/* SMPL TODO
+
+SMPL
+TODO: This still needs a lot of work to get functional..
+Looping doesn't quite work yet..
+
+
+I'm in the middle of working on Smpl's playback system..
+keep working on that.. I'm making a SampleFileView linked to
+SampleFile, right now I have the synthdefs telling me position
+and when they are done via SendTrig and OSCfuncs...
+the gui part is not done on SampleFile, and once it is,
+this gui needs to be integrated with Smpl's gui...
+I think that play / stop operations are done ON the SampleFile
+and automagically reflected in the respective view... however,
+a loop flag must be set manually on the SampleFile
+
+1. Rehash scenes for my new composition concept...
+2. make Scenes work more like Macros, Syn, Smpl, & other modules in usage/syntax
+3. Allow navigating through scene instances (doesn't seem to work now?)
+
+*/
 
 
 -------------------------------------------------*/
@@ -388,6 +414,22 @@ Smpl {
     });
 
     win.front.alwaysOnTop_(alwaysOnTop);
+  }
+
+  // Convenience method, play a sample as a stand-alone synth instance
+  *splay {|id, start=0, end=(-1), rate=1.0, amp=1.0, out=0, co=20000, rq=1, pan=0|
+    var ch, syn, smp = Smpl.samples.at(id);
+    ch = smp.numChannels;
+    if(end == -1) { end = smp.numFrames };
+    if(ch==1) {
+      // TODO: why is this less delayed than an event.play? Event needs to be scheduled on a tempo?
+    syn = Synth(\pitchedSample1ch, [\amp, amp, \start, start, \end, end, \rootPitch, "A4".f,
+      \freq, "A4".f * rate, \atk, 0.001, \rel, 0.1, \co1, co, \rq1, rq, \out, out, \pan, pan, \buf, smp.buffer]);
+  } {
+    syn = Synth(\pitchedSample2ch, [\amp, amp, \start, start, \end, end, \rootPitch, "A4".f,
+      \freq, "A4".f * rate, \atk, 0.001, \rel, 0.1, \co1, co, \rq1, rq, \out, out, \pan, pan, \buf, smp.buffer]);
+  };
+  ^syn;
   }
 
 }

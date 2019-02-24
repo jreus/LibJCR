@@ -66,7 +66,7 @@ l.playZone(2, 0, 1.0)
 Lisa {
   classvar <max_zones = 24;
   var <server;
-  var <bufdur, <bufframes, <bigbuf;
+  var <dur, <numFrames, <bigbuf;
   var <zones, <selectedZone = 0;
 
   var <win, <zoneText;
@@ -75,13 +75,13 @@ Lisa {
     ^super.new.init(serv, dur);
   }
 
-  init {|serv, dur|
+  init {|serv, length|
     if(serv.isNil) { server = Server.default } { server = serv };
     this.pr_checkServerRunning({^nil});
     this.pr_loadSynthdefs;
-    bufdur= dur;
-    bufframes = bufdur * server.sampleRate;
-    bigbuf = Buffer.alloc(server, bufframes, 1);
+    dur= length;
+    numFrames = dur * server.sampleRate;
+    bigbuf = Buffer.alloc(server, numFrames, 1);
     zones = Array.newClear(max_zones);
   }
 
@@ -94,7 +94,7 @@ Lisa {
   initNumZones {|numzones|
     var zonesize;
     if(numzones > max_zones) { numzones = max_zones };
-    zonesize = bufframes / numzones;
+    zonesize = numFrames / numzones;
     (numzones).do {|it|
       zones[it] = [it * zonesize, (it+1) * zonesize];
     };

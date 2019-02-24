@@ -46,23 +46,9 @@ ________________________________________________________________*/
 Scenes {
   classvar <rootPath, <scenePath, <instancePath, <sceneNames;
   classvar <win, <onSelectOption=0;
-  classvar <meters,<initialized=false;
+  classvar <initialized=false;
 
 
-  *meter {|server|
-    var bnd, len;
-    server = server ? Server.default;
-    if(meters.isNil.or { meters.window.isClosed }) {
-      meters = server.meter;
-      meters.window.alwaysOnTop_(true).front;
-      bnd = meters.window.bounds;
-      len = Window.screenBounds.width - bnd.width;
-      meters.window.bounds = Rect(len, 0, bnd.width, bnd.height);
-    } {
-      meters.window.front;
-    };
-    ^meters;
-  }
 
   // should throw a fatal error if not being run from root.scd
   *init {|rootpath, scenedir|
@@ -96,54 +82,6 @@ Scenes {
     instancePath = scenePath +/+ "instances/";
     if(File.exists(instancePath).not) { File.mkdir(instancePath) };
     initialized=true;
-  }
-
-  *startup {|server=nil, showScenes=true, showMeters=true, loadSamples=true, limitSamplesLocal=1000, limitSamplesGlobal=30000, rootpath=nil, scenedir=nil, onBoot=nil|
-    var win;
-    this.init(rootpath, scenedir);
-
-    // Choose Audio Device, Boot Server, Load Macros, Synths & Samples
-    if(server.isNil) { server = Server.default };
-    // TODO: Also choose block size in device selector
-    win = Window.new("Choose Audio Device", Rect(400,500,200,200));
-    ListView.new(win, Rect(0, 0, 200, 200))
-    .items_(ServerOptions.devices.sort)
-    .mouseUpAction_({|lv|
-      "Using %\n".postf(lv.items[lv.value]);
-      server.options.device = lv.items[lv.value];
-      server.options.numInputBusChannels = 20;
-      server.options.numOutputBusChannels = 20;
-      server.options.memSize = 65536;
-      server.options.blockSize = 64;
-      server.options.numWireBufs = 512;
-      win.close;
-      server.waitForBoot {
-        var macrodir;
-        if(showMeters) {
-        var bnd, len;
-        if(meters.notNil) { meters.window.close };
-        meters = server.meter;
-        meters.window.alwaysOnTop_(true).front;
-        bnd = meters.window.bounds;
-        len = Window.screenBounds.width - bnd.width;
-        meters.window.bounds = Rect(len, 0, bnd.width, bnd.height);
-        };
-
-        Syn.load;
-        Macros.load(rootPath +/+ "_macros/");
-        if(loadSamples) {
-            Smpl.load(server,
-              localsampledir: rootPath +/+ "_samples/",
-              verbose: false,
-              limitLocal: limitSamplesLocal,
-              limitGlobal: limitSamplesGlobal,
-              doneFunc: { if(showScenes) { this.gui } });
-        };
-
-        if(onBoot.notNil) { onBoot.value };
-      };
-      });
-    win.alwaysOnTop_(true).front;
   }
 
   *sceneExists {|name|
