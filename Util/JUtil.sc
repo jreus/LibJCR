@@ -173,6 +173,27 @@ JLog {
 		^this.notemidi;
 	}
 
+  // play a series of intervals
+  play {|root=\c5, tuning=\et12, amp=0.2, dur=0.5, delta=0.6, pan=0.0|
+    var etsemitone = 2**(1/12), etwhole = 2**(1/6);
+    if(root.isNumber.not) { root = root.f };
+    {
+      this.do {|char|
+        root.play(amp, pan, dur);
+        root.postln;
+        if(char == $-) { // whole step
+          root = root * etwhole;
+        };
+        if(char == $.) { // half step
+          root = root * etsemitone;
+        };
+        delta.wait;
+      };
+      root.play(amp, pan, dur);
+    }.fork;
+    ^this;
+  }
+
 	// postln with formatting
   //postf {|...args| ^this.format(*args).postln; }
 }
@@ -186,6 +207,16 @@ JLog {
 
   m {
     ^this.collect(_.m);
+  }
+
+  play {|amp, pan, dur=0.5, delta=0.6|
+    {
+      this.do {|note|
+        note.play(amp, pan, dur);
+        delta.wait;
+      }
+    }.fork;
+    ^this;
   }
 
   pseq {|rep=inf, off=0|
@@ -212,6 +243,30 @@ JLog {
 	m {
 		^this.asString.m
 	}
+
+  // Plays note symbols as notes
+  play {|amp=0.2, pan=0.0, dur=0.5|
+    ^this.notecps.play(amp, pan,dur);
+  }
+}
+
+
++ SimpleNumber {
+
+  play {|amp=0.2, pan=0.0, dur=0.5| // plays number as frequency
+    var syn = {
+      var numharms=10, falloff=0.6, sig;
+      var freqs = Array.newClear(numharms);
+      var amps = Array.newClear(numharms);
+      numharms.do {|idx|
+        freqs[idx] = this * (idx+1);
+        amps[idx] = falloff**idx;
+      };
+      sig = SinOsc.ar(freqs, mul: amps).sum;
+      Pan2.ar(sig, pan, amp) * EnvGen.ar(Env.perc, timeScale: dur, doneAction: 2)
+    }.play;
+    ^syn;
+  }
 }
 
 + Server {

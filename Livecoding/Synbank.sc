@@ -34,13 +34,15 @@ Synbank[] {
 
   at {|idx| ^synths[idx]}
 
-
-
   gate {|idx, val=0| synths[idx].set(\gate, val) }
 
-  play {|slot=0, args|
+  play {|slot=0, args, crossfade=false|
     if(synths[slot].notNil) {
-      synths[slot].free; synths[slot] = nil;
+      if(crossfade) {
+        synths[slot].set(\gate, 0);
+      } {
+        synths[slot].free;
+      };
     };
     if(args.isNil) {
       if(lastargs[slot].isNil) {
@@ -55,15 +57,20 @@ Synbank[] {
     ^synths[slot];
   }
 
-  clear {
+  freeAll {
     synths = synths.collect {|syn|
       if(syn.notNil) { syn.free };
       nil;
-  };
+    };
  }
 
-  gateAll { synths.do {|syn| if(syn.notNil) { syn.set(\gate, 0) } } }
+  mute {|state=1|
+    synths.do {|syn| if(syn.notNil) { syn.set(\mute, state) } }
+  }
 
+  gateAll {
+    synths.do {|syn| if(syn.notNil) { syn.set(\gate, 0) } }
+  }
 
 }
 

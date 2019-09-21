@@ -25,5 +25,24 @@ PenvProxy {
 		};
 		^proxy;
 	}
-
 }
+
+// Replicates the functionality of Array.interpolation
+// for patterns
+Pinterpolate {
+  *new {|size=10, start=0, end=1, repeats=1, offset=0|
+    ^Pseq(Array.interpolation(size, start, end), repeats, offset);
+  }
+}
+
+
+/*
+Array shortcut functions for generating patterns
+*/
++ ArrayedCollection {
+	seq {|repeats=inf, offset=0|
+		^Pseq(this, repeats, offset);
+	}
+}
+
+

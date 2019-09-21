@@ -35,12 +35,15 @@ instances within a performance concept.
 
 @usage
 
-Create a file called root.scd where your root scene will be located.
-From inside the root.scd call
-~sc = Scenes.new;
+Create a file called _main.scd where your root scene will be located.
+From inside the _main.scd call something like
 
-f = "".resolveRelative +/+ "scenes";
-z = Scenes(f).makeGui;
+Project.startup(s, false, true,
+  1000, 1000,
+  scOnly:true, onBoot: {
+  "MY PROJECT SETUP CODE".postln;
+});
+
 ________________________________________________________________*/
 
 Scenes {
@@ -48,19 +51,17 @@ Scenes {
   classvar <win, <onSelectOption=0;
   classvar <initialized=false;
 
-
-
-  // should throw a fatal error if not being run from root.scd
+  // should throw a fatal error if not being run from _main.scd
   *init {|rootpath, scenedir|
     var thispath;
     if(rootpath.isNil) {
       rootpath = PathName(Document.current.path);
     } {
-      rootpath = PathName(rootpath +/+ "root.scd");
+      rootpath = PathName(rootpath +/+ "_main.scd");
     };
 
-    if(rootpath.isFile.not.or {rootpath.fileName != "root.scd"}) {
-        "Scenes must be initialized from 'root.scd', or a path to 'root.scd' must be provided".throw;
+    if(rootpath.isFile.not.or {rootpath.fileName != "_main.scd"}) {
+      "Scenes must be initialized from '_main.scd', or a path to '_main.scd' must be provided".throw;
     };
     rootPath = rootpath.pathOnly;
     if(scenedir.isNil) { scenedir = rootPath +/+ "_scenes/" };
@@ -70,15 +71,15 @@ Scenes {
     if(File.exists(scenePath).not) {
       File.mkdir(scenePath);
     };
-    if(File.exists(rootPath +/+ "root.scd").not) {
-      File.use(rootPath +/+ "root.scd","w", {|fp|
+    if(File.exists(rootPath +/+ "_main.scd").not) {
+      File.use(rootPath +/+ "_main.scd","w", {|fp|
         fp.write("/*** Root Scene ***/\nMacros.load\n~sc=Scene.new\n")
       });
     };
     sceneNames = (scenePath +/+ "*.scd").pathMatch.collect {|it|
       PathName(it).fileNameWithoutExtension
     };
-    sceneNames = sceneNames.insert(0, "root"); // root is a reserved scene name
+    sceneNames = sceneNames.insert(0, "_main"); // _main is a reserved scene name
     instancePath = scenePath +/+ "instances/";
     if(File.exists(instancePath).not) { File.mkdir(instancePath) };
     initialized=true;
@@ -192,8 +193,8 @@ Scenes {
     renameBtn.action = {|btn|
       var scene, msg;
       scene = sceneList.items[sceneList.value];
-      if(scene == "root") {
-        "'root' cannot be renamed".error;
+      if(scene == "_main") {
+        "'_main' cannot be renamed".error;
       } {
         msg = "Enter a new name for '%'".format(scene);
         styler.makeModalTextEntryDialog("Rename Scene",
@@ -245,8 +246,8 @@ Scenes {
       if((now - lastClick) < thresh) {
         // Open Source
         scene = sceneList.items[sceneList.value];
-        if(scene == "root") {
-          templatepath = rootPath +/+ "root.scd";
+        if(scene == "_main") {
+          templatepath = rootPath +/+ "_main.scd";
         } {
           templatepath = scenePath +/+ scene ++ ".scd";
         };
@@ -260,8 +261,8 @@ Scenes {
       var btn, radio, instanceList, loadInstanceFunc, newInstanceFunc;
       var matching, scene, templatepath;
       scene = lv.items[lv.value];
-      if(scene == "root") {
-        templatepath = rootPath +/+ "root.scd";
+      if(scene == "_main") {
+        templatepath = rootPath +/+ "_main.scd";
       } {
         templatepath = scenePath +/+ scene ++ ".scd";
       };

@@ -66,7 +66,7 @@ Syn {
 	*load { |synthDefsPath, server|
 		var sp;
 		if (synthDefsPath.isNil) {
-			path = 	"~/../Drive/DEV/SC_Synthesis/".asAbsolutePath; // put your synthdef library path here
+			path = 	"~/Drive/DEV/SC_Synthesis/".asAbsolutePath; // put your synthdef library path here
 		} {
 			path = synthDefsPath;
 		};

@@ -1,36 +1,34 @@
-/******************************************
+/*
 Macro system within SuperCollider.
-
 
 2018 Jonathan Reus
 jonathanreus.com
 info@jonathanreus.com
 
+Developed during ALMAT residency @ IEM Graz
+*/
 
 
-****************************************
-FEATURES TODOS:
+/*
+FEATURES / TODOS:
 * further develop editor gui
  * edit, save & load functionality
  * a little check/tick for whether a macro is global/local
 
 * allow in-code macros for flow signal / multigesture/envelope drawing/random envelope system
-
-
-*******************************************/
+*/
 
 /*
+SYSTEM PREPARATION:
 Run this to put Macros.load in the startup file.
 ~fp = Platform.userConfigDir +/+ "startup.scd";
 File.exists(~fp);
 if(File.exists(~fp).not) { File.use(~fp, "w", {|fp| fp.write("Macros.load;\n") }) };
 Document.open(~fp);
-
 */
 
-
-
-/* USAGE: *********************
+/*
+USAGE:
 
 Macros.load(); // loads default_macros.yaml in the same dir as the classfile for Macros
 // also creates macros local directory
@@ -58,7 +56,7 @@ Macros.active_(false); // disable macros
 // resources and environment variables to implement more sophisticated rewriting rules.
 // REWRITE: {|input,args| "Synth(%,%,%).format(args[0],args[1],args[2])" }
 
-********************************/
+*/
 
 
 Macros {
@@ -66,32 +64,51 @@ Macros {
 	classvar <names; // ordered list of Macro names
 	classvar <dict; // global dictionary of Macros by name
 	classvar <byInputPattern; // dictionary of Macros by eval string
-	classvar <preProcessorFunc=nil; // Add additional preprocessor function on top of the Macros system
-	// this is useful when you want to add additional SC preprocessor work without overwriting the macro system
-	classvar <>parseStr;
+	classvar <preProcessorFunc=nil; // Add additional preprocessor function on top of the Macros system. Useful when you want to add additional SC preprocessor work without overwriting the macro system
+	classvar <>prefixStr, <>postfixStr; // prefix/postfix for macro commands
+  classvar <>regexp; // basic matching character class
   classvar <>verbose=true;
 
+  // state data storage for macros
+  classvar <data;
+
+  // gui & file locations
 	classvar <win;
 	classvar <macroPath, <defaultLocalMacroPath;
 
 	classvar <globalMacroPath, <onlyGlobal=false;
 
 	*initClass {
-		parseStr = ">>";
+		prefixStr = ">>";
+    postfixStr = "<<";
+    regexp = "[\._\\-\n >< a-zA-Z0-9 \(\) \\+\!\{\}]+";
 		names = List.new;
 		dict = Dictionary.new;
+    data = ();
 		byInputPattern = Dictionary.new;
 		globalMacroPath = "".resolveRelative +/+ "global_macros.yaml";
 	}
 
+  *loadFromFile {|filepath|
+    var yaml;
 
+    if(File.exists(filepath).not) {
+      "Macros file does not exist at path %".format(filepath).throw;
+    };
+
+    yaml = filepath.parseYAMLFile;
+    yaml.keysValuesDo {|key, val|
+      this.addMacro(Macro.newFromDict(key, val));
+    };
+
+  }
 
   // onlyGlobal==true skips initializing a local config
 	*load {|macrodir, onlyglobal=false|
 		var xml, filenames, yaml;
     onlyGlobal = onlyglobal;
 
-    "GLOBAL MACRO PATH %".format(macroPath,globalMacroPath).postln;
+    "GLOBAL MACRO PATH %".format(globalMacroPath).postln;
 		if(File.exists(globalMacroPath).not) {
       this.makeDefaultMacroFile(globalMacroPath)
     };
@@ -129,9 +146,6 @@ Macros {
 	}
 
   *at {|name| ^this.dict[name] }
-
-
-
 
 	*makeDefaultMacroFile {|filepath|
 		var macros = Dictionary.new;
@@ -277,25 +291,37 @@ Ndef(\\p%).play(out:0, numChannels: 1);\n".format(~nMacroPdefs, ~nMacroPdefs, ~n
 		^isActive;
 	}
 
-	// Evaluate any macros on the given line number
-	*evalLine {arg ln;
+	/*
+  Evaluate macros on the given line number in the active Document
+  @ln line number in active document
+
+  NOTE: This function is broken, see TODO below!
+  */
+  *evalLine {|ln|
 		var doc,line,pslen,command;
+    var pattern, match;
 		var mac,rewrite,action;
 		doc = Document.current;
 		line = doc.getLine(ln);
-		pslen = this.parseStr.size();
-		if((pslen==0) || line[0..(pslen-1)] == this.parseStr) { // limit to parse string
-			command = line[pslen..].asSymbol;
-			mac = dict[command];
-			rewrite = mac.rewrite;
-			action = mac.action;
-			if(rewrite.notNil) {
-				doc.replaceLine(ln, rewrite);
-			};
-			if(action.notNil) {
-				action.(line);
-			};
-		};
+		pslen = this.prefixStr.size();
+    pattern = "^%(%)%$".format(this.prefixStr, this.regexp, this.postfixStr);
+    match = line.findRegexp(pattern);
+
+    if(match.size > 0) {
+      command = match[1][1];
+      mac = dict[command]; // TODO: This only works when the command=input pattern. Should use regexp matching!
+      if(mac.notNil) {
+        // TODO:: The functionality of rewrite has
+        // also changed.. this code no longer works
+        rewrite = mac.rewrite(command);
+        if(rewrite.notNil) {
+          doc.replaceLine(ln, rewrite[0]);
+        }
+      } {
+        "No macro patterns found in '%'".format(line).warn;
+      };
+    };
+
 	}
 
 	// Evaluate the string as if it were a macro
@@ -311,20 +337,25 @@ Ndef(\\p%).play(out:0, numChannels: 1);\n".format(~nMacroPdefs, ~nMacroPdefs, ~n
 
 	*active_ {|val=true|
 		var prefunc = nil;
-		if(val == true) { // ***** PREPROCESSOR PARSING FUNCTION ******
-			prefunc = {|code, interpreter|
-				var stidx, psLen = this.parseStr.size();
-        stidx = code.find(this.parseStr);
-        if(stidx.notNil) {
+		if(val == true) {
+
+/* ******* PREPROCESSOR PARSING FUNCTION ********* */
+/* ******* PREPROCESSOR PARSING FUNCTION ********* */
+/* ******* PREPROCESSOR PARSING FUNCTION ********* */
+
+      prefunc = {|code, interpreter|
+				var processedCode = code;
+        var stidx, psLen = this.prefixStr.size();
+        stidx = code.find(this.prefixStr);
+        if(stidx.notNil) { // prefix string found
 					var doc, pos, mac, name, linestart;
           var endidx, input;
-					//var myscript = code[psLen..]; // fetch the code
           endidx = stidx + psLen;
-          // read in code until first encountered whitespace
-          while {(endidx < code.size).and({code[endidx].isSpace.not})} { endidx = endidx + 1 };
+          // read in code for macro parsing
+          // (until newline)
+          while {(endidx < code.size).and({code[endidx] != $\n})} { endidx = endidx + 1 };
           input = code[(stidx+psLen)..endidx];
-          name = input;
-          mac = this.dict.at(name); // try to just match against macro name
+          mac = this.dict.at(input); // first try matching against input
           if(mac.isNil) { // then try to match against input pattern (more work)
 						var kv, match, it=0, found=false, keyvals = byInputPattern.asAssociations;
 						while({found.not && (it < keyvals.size)}) {
@@ -336,28 +367,20 @@ Ndef(\\p%).play(out:0, numChannels: 1);\n".format(~nMacroPdefs, ~nMacroPdefs, ~n
 					};
 
 					if(mac.notNil) { // matched a macro
-            var newcode, type;
             var insertStart, insertSize, rewrite, actionFunc, args, matchSize;
-            type = mac.type;
-            #rewrite, matchSize, args = mac.rewrite(input, verbose);
+            #rewrite, args = mac.rewrite(input, verbose);
 
-
-            if(rewrite.isNil) {
-              type = \rewrite; newcode = code;
-            } {
-              newcode = code[..(stidx-1)] ++ rewrite ++ code[(endidx+1)..];
-            };
+            // Don't do any further sclang parsing
+            // all side effects happen in actionFunc
+            processedCode = nil;
 
             switch(mac.type,
-                \command, {
-                  // replace the command inside the code & execute the new code without rewriting...
-                  code = newcode;
-                },
-                \rewrite, {
-                  var doc = Document.current;
-                  insertStart = doc.selectionStart - 1;
-                  insertSize = doc.selectionSize;
-                  if(insertSize == 0) { // a line was evaluated, or a selection using parens
+              \rewrite, { // insert the rewrite in place of the code
+              var doc = Document.current;
+              rewrite = code[..(stidx-1)] ++ rewrite ++ code[(endidx+1)..];
+              insertStart = doc.selectionStart - 1;
+              insertSize = doc.selectionSize;
+              if(insertSize == 0) { // a line was evaluated, or a selection using parens
                     // BUG: The parens case is very tricky and requires more complex parsing...
                     // Here I only parse the single-line case..
                   while { (insertStart >= 0).and({doc.getChar(insertStart).at(0) != $\n}) } { insertStart = insertStart-1 };
@@ -365,13 +388,13 @@ Ndef(\\p%).play(out:0, numChannels: 1);\n".format(~nMacroPdefs, ~nMacroPdefs, ~n
                   insertSize = code.size + 1;
                   };
 
-                  doc.string_(newcode, insertStart, insertSize);
-                  code = nil; // don't evaluate anything further
+                  doc.string_(rewrite, insertStart, insertSize);
                 },
-                { "Bad macro type %".format(mac.type).error; ^nil }
+              \command, {  },
+              { "Bad macro type %".format(mac.type).error; ^nil }
               )
           } {// if the macro is still nil, no macro was matched
-						"Could not evaluate Macro %".format(input).error;
+						"No Macro matched %".format(input).error;
           };
 				};
 
@@ -381,7 +404,7 @@ Ndef(\\p%).play(out:0, numChannels: 1);\n".format(~nMacroPdefs, ~nMacroPdefs, ~n
 				};
 
         //"EVALUATING:\n%".format(code).postln;
-				code; // send the code string through to SC for further interpreting
+				processedCode; // send the processed code to SC for parsing
 			};
 		} {
       // TODO: set the preProcessor to preProcessorFuncs when macros are disabled?
@@ -398,14 +421,22 @@ Ndef(\\p%).play(out:0, numChannels: 1);\n".format(~nMacroPdefs, ~nMacroPdefs, ~n
 
 	/*
 	Register a new macro
-	@param rewrite Either a rewrite pattern (String) or a custom rewrite function
-	*/
-	*new {|name, type=\command, inputPattern=nil, rewrite=nil, action=nil|
-		var newmac = Macro(name, type, inputPattern, rewrite, action);
+  @name unique symbol identifying macro
+  @type \command or \rewrite
+  @inputPattern pattern matching for macro, if nil will match the name
+  @rewrite rewrite pattern or function (potentially with arguments)
+	@action side effect action function
+  */
+	*new {|name, type=\command, inputPattern=nil, rewrite=nil, actionFunc=nil|
+		var newmac = Macro(name, type, inputPattern, rewrite, actionFunc);
+    "new macro %".format(newmac).postln;
 		this.addMacro(newmac);
 		^newmac;
 	}
 
+  /*
+  Add a Macro object...
+  */
 	*addMacro {|macro|
 		this.dict.put(macro.name, macro);
 		this.byInputPattern.put(macro.inputPattern, macro);
@@ -417,32 +448,35 @@ Macro {
 	// A rewrite can be a simple string with placeholders (i.e. like String.format)
 	// or can be a function for complex translations from input code to rewritten code
 	var <name, <inputPattern, <rewritePattern, <rewriteFunc, <actionFunc;
-  var <type; // command or rewrite ...
-  // commands invisibly rewrite to executable code before evaluation
-  // rewrites replace the input code with another string
-  // both execute actionFunc as a side effect
+  var <type; /*
+  \command ~ invisibly rewrite to executable code before evaluation
+  \rewrite ~ replace the input code with another string
+  Both execute actionFunc as a side effect
+  */
 
-	*new {|name, inputPattern, rewrite, action|
-		^super.new.init(name, inputPattern, rewrite, action);
+	*new {|name, type, inputPattern, rewrite, actionFunc|
+		^super.new.init(name, type, inputPattern, rewrite, actionFunc);
 	}
 
 	init {|nm, typ, ip, rw, act|
-		name = nm;
-		inputPattern = ip;
 		actionFunc = act;
     type = typ;
 		if(rw.class == Function) { rewriteFunc = rw } { rewritePattern = rw };
+    if(nm.isKindOf(Symbol)) { nm = nm.asString; };
     if(nm.isKindOf(String).not) {
       "Macro name must be a string".error;
       ^nil;
     };
+    name = nm;
+    if(ip.isNil) { ip = name };
+    inputPattern = ip;
     ^this;
 	}
 
 
 	/*
 	Returns the rewrite string for a given input string
-	A rewrite pattern string uses argument placeholders: #1# #2# #3#
+	A rewrite pattern string uses argument placeholders: @1@ @2@ @3@
 	*/
 	rewrite {|input, verbose=false|
 		var placeholders, result, args=[];

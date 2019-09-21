@@ -138,12 +138,12 @@ Lisa {
     }).add;
 
     // Simple playback
-    SynthDef(\simplePlayBuf, {|out=0, buf, amp=1.0, pan=0, start, end|
+    SynthDef(\simplePlayBuf, {|out=0, buf, amp=1.0, pan=0, start, end, rate=1, atk=0.01, rel=0.01|
       var sig, head, dur;
-      dur = (end-start) / (SampleRate.ir * BufRateScale.kr(buf));
-      head = Line.ar(start, end, dur, doneAction: 2);
-      sig = BufRd.ar(1, buf, head, 0);
-      Out.ar(0, sig);
+      dur = (end-start) / (SampleRate.ir * BufRateScale.kr(buf)) / rate;
+      head = Line.ar(start, end, dur);
+      sig = BufRd.ar(1, buf, head, 0) * EnvGen.ar(Env.linen(atk, dur-atk-rel, rel), 1, doneAction: 2);
+      Out.ar(out, Pan2.ar(sig, pan, amp));
     }).add;
   }
 
@@ -234,6 +234,9 @@ Lisa {
   info {|position|
     var win, top=0, left=100, width=100, height=100;
     var styler, childView;
+    top = Window.screenBounds.height - (height*3);
+    left = Window.screenBounds.width - left;
+
     if(win.notNil) {
       if(win.isClosed.not) {
         win.front;

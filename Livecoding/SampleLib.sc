@@ -55,6 +55,8 @@ a loop flag must be set manually on the SampleFile
 
 */
 
+// TODO: Add a Smpl.find function that returns something similar to what you're looking for, or an array of such
+
 
 -------------------------------------------------*/
 
@@ -66,7 +68,7 @@ a loop flag must be set manually on the SampleFile
 
 Smpl.lazyLoadGlobal = false;
 Smpl.lazyLoadLocal = true;
-Smpl.load(verbose: true); // loads global & local sample libraries
+Smpl.load(verbose: true); // loads global sample library
 
 Smpl.at("drum001"); // get sample by id, or search library by various functions
 // e.g. by type, by directory, etc..
@@ -79,6 +81,8 @@ Smpl {
   classvar <samples; // all available sample files by id
   classvar <samplesByGroup; // available sample files, by group name
   classvar <allGroups, <allTags; // lists of all available sample groups and tags
+  classvar <localSamples;
+  classvar <globalSamples;
   classvar <globalSamplesPath; // global samples directory
   classvar <localSamplesPath; // local samples directory
 
@@ -96,9 +100,37 @@ Smpl {
   *initClass {
     samples = Dictionary.new;
     samplesByGroup = Dictionary.new;
+    globalSamples = Dictionary.new;
+    localSamples = Dictionary.new;
     allGroups = List.new;
     allTags = List.new;
     globalSamplesPath = "~/_samples".absolutePath;
+
+    // General sample event for buffer playback
+    Event.addEventType(\sample, {|s|
+      var chans = ~buf.numChannels;
+      if(~end.isNil) { ~end = ~buf.numFrames };
+      if(chans == 1) {
+        ~instrument = \pitchedSample1ch;
+      } {
+        ~instrument = \pitchedSample2ch;
+      };
+      if(~dur.isNil) { ~dur = (~end - ~start) / ~buf.sampleRate };
+      ~type = \note;
+      currentEnvironment.play;
+    }, (freq: \c5.f, rootPitch: \c5.f, atk: 0.01, rel: 0.01, start: 0, out: 0));
+
+    // Playback event for Smpl library
+    Event.addEventType(\smpl, {|s|
+      ~buf = Smpl.buf(~smpl);
+      ~type = \sample;
+      currentEnvironment.play;
+    }, ());
+  }
+
+  *pr_loadEventTypes {
+
+
   }
 
   // private method
@@ -110,29 +142,33 @@ Smpl {
     };
   }
 
-  // By default will look for a local '_samples' directory in the same directory as the current document.
+
   // A global samples directory will be searched for at globalSamplesPath
+  // All directories in the array localSamplePaths will be loaded
   // If a server is not provided, server will be the default server.
-  *load {|server=nil,localsampledir=nil,verbose=false, limitLocal=nil, limitGlobal=nil, doneFunc=nil|
-    var samplePath, loaded;
+  *load {|server=nil, verbose=false, limitLocal=nil, limitGlobal=nil, localSamplePaths=nil, doneFunc=nil|
+    var samplePath, loaded=0;
     activeServer = server;
     this.pr_checkServerAlive({^nil});
 
-    if(localsampledir.isNil) { localsampledir = Document.current.dir +/+ "_samples" };
-    localSamplesPath = localsampledir;
-    if(File.exists(localSamplesPath).not) { File.mkdir(localSamplesPath) };
     if(File.exists(globalSamplesPath).not) { File.mkdir(globalSamplesPath) };
 
-    // Load samples from local & global paths
-    "\nSmpl: Loading Local Samples at %".format(localSamplesPath).postln;
-    samplePath = PathName.new(localSamplesPath);
-    loaded = this.pr_loadSamples(samplePath, lazyLoadLocal, verbose, limitLocal);
-    "Smpl: % samples loaded".format(loaded).postln;
+    if(localSamplePaths.notNil) { // Load sample directories
+      "\nSmpl: Loading Local Sample Banks ...".postln;
+      localSamplePaths.do {|samplePath|
+        samplePath = PathName.new(samplePath);
+        loaded = loaded + this.pr_loadSamples(samplePath, lazyLoadLocal, verbose, limitLocal-loaded);
+        ".%.".format(samplePath.folderName).post;
+      };
+      "\nSmpl: % samples loaded".format(loaded).postln;
+    } { "Smpl: No local sample paths provided".postln };
 
+
+    // Load samples from global directory
     "\nSmpl: Loading Global Samples at %".format(globalSamplesPath).postln;
     samplePath = PathName.new(globalSamplesPath);
     loaded = this.pr_loadSamples(samplePath, lazyLoadGlobal, verbose, limitGlobal);
-    "Smpl: % samples loaded".format(loaded).postln;
+    "\nSmpl: % samples loaded".format(loaded).postln;
 
     // Collect groups and tags
     allGroups = Set.new;
@@ -152,59 +188,70 @@ Smpl {
   // private method
   *pr_loadSamples {|samplePath, lazyLoad, verbose, limit|
     var res, tmplim = limit;
-    res = block {|break|
+    res = block {|limitReached|
       samplePath.filesDo {|path,i|
-        var sf; // samplefile
-        var id, group, groupId, preStr = ".";
+        var res;
+        res = this.pr_loadSampleAtPathName(path, lazyLoad, verbose);
+        if(res.notNil) {
+          if(verbose) {
+            "%[%: %]".format(res.id, path.folderName, path.fileName).postln;
+          } { if(i%100 == 0) { ".".post } };
 
-        sf = SampleFile.openRead(path);
-
-        if(sf.notNil) {
-          id = path.fileNameWithoutExtension.replace(" ","");
-          if(samples.at(id).notNil) {
-              if(samples.at(id).path != sf.path) {
-              // if paths are equal, the sample has already been loaded
-              id = "%_%".format(sf.folderGroups.last.replace(" ","_"), id);
-              };
-          };
-
-          if(limit.notNil) {
-            if(samples.at(id).isNil.and {limit <= 0}) {
-              break.value(\limit)
-            } {
-              limit = limit-1;
-            };
-        };
-          sf.name = id;
-          samples.put(id, sf);
-          groupId = path.folderName.asSymbol;
-          group = samplesByGroup.at(groupId);
-          if(group.isNil) { // new group
-            group = Dictionary.new;
-            samplesByGroup.put(groupId, group);
-          };
-          group.put(id, sf);
-          sf.library = groupId.asString;
-
-          if(lazyLoad == false) { // if lazyload not active, go ahead and load everything
-            sf.loadFileIntoBuffer(activeServer);
-            preStr = "...";
-          };
-
-          if(verbose)
-          { "%[%: %]".format(preStr, path.folderName, path.fileName).postln }
-          { if(i%100 == 0) { ".".post } };
-
-        } {
-          if(verbose) { path.fileName.warn };
+          tmplim = tmplim - 1;
+          if(tmplim == 0) { limitReached.value };
         };
       };
     };
-    "".postln;
+
     if(res == \limit) {
-      "limit % reached, some samples were not loaded".format(tmplim).warn;
+      "limit % reached, some samples were not loaded".format(limit).warn;
     };
-    ^(tmplim - limit);
+
+    ^(limit-tmplim);
+  }
+
+  *pr_loadSampleAtPathName {|path, lazyLoad, verbose|
+    var sf; // samplefile
+    var id, group, groupId, preStr = ".";
+    var isGlobal = false;
+
+    sf = SampleFile.openRead(path);
+
+    if(sf.notNil) {
+      // TEST IF GLOBAL OR LOCAL.. path matches
+      // globalSamplesPath
+      isGlobal = (path.pathOnly.find(globalSamplesPath) == 0);
+
+      id = path.fileNameWithoutExtension.replace(" ","");
+      if(samples.at(id).notNil) {
+        if(samples.at(id).path != sf.path) { // if paths are not equal, modify id to avoid doubles
+          id = "%_%".format(sf.folderGroups.last.replace(" ","_"), id);
+        };
+      };
+
+      sf.name = id;
+      samples.put(id, sf);
+      if(isGlobal) { globalSamples.put(id, sf) } { localSamples.put(id, sf) };
+
+      groupId = path.folderName.asSymbol;
+      group = samplesByGroup.at(groupId);
+      if(group.isNil) { // new group
+        group = Dictionary.new;
+        samplesByGroup.put(groupId, group);
+      };
+      group.put(id, sf);
+      sf.library = groupId.asString;
+
+      if(lazyLoad == false) { // if lazyload not active, go ahead and load everything
+        sf.loadFileIntoBuffer(activeServer);
+        preStr = "...";
+      };
+
+      ^sf;
+    } {
+      if(verbose) { "Smpl: % not found".format(path.fileName).warn };
+      ^nil;
+    };
   }
 
   // When lazyloading is active, preload lets you preload groups of samples
@@ -232,6 +279,20 @@ Smpl {
       sample.loadFileIntoBuffer(action:loadAction);
     };
     ^sample;
+  }
+
+  // returns the buffer for a given SampleFile id, loads the sample into
+  // a buffer if not loaded
+  *buf {|name, loadAction|
+    ^this.at(name, true, loadAction).buffer;
+  }
+
+  *path {|id|
+    if(this.samples[id].notNil) {
+      ^this.samples[id].path;
+    } {
+      ^nil;
+    }
   }
 
 
@@ -353,7 +414,9 @@ Smpl {
           tagfield = TextField(subView, (width-40)@lineheight).string_("tags");
 
           btn = subStyler.getSizableButton(subView, sf.path, size: (width-20)@lineheight);
-          btn.action = {|btn| "open %".format(sf.path.dirname).unixCmd }; // browse in finder
+          btn.action_({|btn| // open in finder
+            "open '%'".format(sf.path.dirname).unixCmd;
+          });
 
           // event & array buttons
           insertEventBtn = subStyler.getSizableButton(subView, "event", size: 50@lineheight);
@@ -416,20 +479,38 @@ Smpl {
     win.front.alwaysOnTop_(alwaysOnTop);
   }
 
-  // Convenience method, play a sample as a stand-alone synth instance
+  /*
+  Convenience method for sample playback.
+
+  This method can be used in musical applications (contrast against SampleFile's play method
+  which should only be used for auditioning).
+
+  The sample is played as a simple synth instance. This method returns a reference to
+  the synth instance.
+  */
   *splay {|id, start=0, end=(-1), rate=1.0, amp=1.0, out=0, co=20000, rq=1, pan=0|
     var ch, syn, smp = Smpl.samples.at(id);
     ch = smp.numChannels;
     if(end == -1) { end = smp.numFrames };
     if(ch==1) {
       // TODO: why is this less delayed than an event.play? Event needs to be scheduled on a tempo?
-    syn = Synth(\pitchedSample1ch, [\amp, amp, \start, start, \end, end, \rootPitch, "A4".f,
-      \freq, "A4".f * rate, \atk, 0.001, \rel, 0.1, \co1, co, \rq1, rq, \out, out, \pan, pan, \buf, smp.buffer]);
-  } {
-    syn = Synth(\pitchedSample2ch, [\amp, amp, \start, start, \end, end, \rootPitch, "A4".f,
-      \freq, "A4".f * rate, \atk, 0.001, \rel, 0.1, \co1, co, \rq1, rq, \out, out, \pan, pan, \buf, smp.buffer]);
-  };
-  ^syn;
+      syn = Synth(\pitchedSample1ch, [\amp, amp, \start, start, \end, end, \rootPitch, "A4".f,
+        \freq, "A4".f * rate, \atk, 0.001, \rel, 0.1, \co, co, \rq, rq, \out, out, \pan, pan, \buf, smp.buffer]);
+    } {
+      syn = Synth(\pitchedSample2ch, [\amp, amp, \start, start, \end, end, \rootPitch, "A4".f,
+        \freq, "A4".f * rate, \atk, 0.001, \rel, 0.1, \co, co, \rq, rq, \out, out, \pan, pan, \buf, smp.buffer]);
+    };
+    ^syn;
+  }
+
+  // Convenience method, insert the ids/paths of an array of sample ids
+  *insertPathnamePairs {|samplelist|
+    var rs = "";
+    samplelist.do {|sm|
+      rs = rs ++ "[\"%\",\"%\"],\n".format(sm, Smpl.at(sm).path);
+    };
+    rs = "[ \n% \n]".format(rs);
+    Document.current.insertAtCursor(rs);
   }
 
 }
@@ -437,27 +518,27 @@ Smpl {
 
 /*
 SampleFilePlayer {
-  var <positionBus=nil;
-  var <playNode=nil;
-  var <server=nil;
-  var <sf=nil;
-  var <sfview=nil;
-  var <triggerId;
+var <positionBus=nil;
+var <playNode=nil;
+var <server=nil;
+var <sf=nil;
+var <sfview=nil;
+var <triggerId;
 
 
 
-  /**** Sample Play Controls ****/
-  play {|out=0, startframe=0, endframe=(-1), amp=1.0, doneFunc|
-    var sdef;
-    this.stop;
-    if(endframe == -1 || (endframe > sf.buffer.numFrames)) { endframe = sf.buffer.numFrames };
-    if(sf.buffer.numChannels == 2) { sdef = sdef2ch } { sdef = sdef1ch };
-    playNode = Synth.new(sdef, [\out, out, \buf, sf.buffer, \pBus, positionBus,
-      \amp, amp, \start, startframe, \end, endframe]).onFree({ positionBus.setSynchronous(endframe); playNode = nil; if(doneFunc.notNil) { doneFunc.value } });
-    ^this;
-  }
-  stop { if(playNode.notNil) { playNode.free; playNode = nil } }
-  /**** End Sample Play Controls ****/
+/**** Sample Play Controls ****/
+play {|out=0, startframe=0, endframe=(-1), amp=1.0, doneFunc|
+var sdef;
+this.stop;
+if(endframe == -1 || (endframe > sf.buffer.numFrames)) { endframe = sf.buffer.numFrames };
+if(sf.buffer.numChannels == 2) { sdef = sdef2ch } { sdef = sdef1ch };
+playNode = Synth.new(sdef, [\out, out, \buf, sf.buffer, \pBus, positionBus,
+\amp, amp, \start, startframe, \end, endframe]).onFree({ positionBus.setSynchronous(endframe); playNode = nil; if(doneFunc.notNil) { doneFunc.value } });
+^this;
+}
+stop { if(playNode.notNil) { playNode.free; playNode = nil } }
+/**** End Sample Play Controls ****/
 
 }
 
@@ -512,10 +593,10 @@ SampleFileView : CompositeView {
           oscfunc = OSCFunc.new({|msg|
             var id = msg[2], val = msg[3];
             {
-            if(id == sf.triggerId) { // cursor position update
-              sfview.timeCursorPosition = val;
-            };
-            if(id == (sf.triggerId+1)) { // done trigger
+              if(id == sf.triggerId) { // cursor position update
+                sfview.timeCursorPosition = val;
+              };
+              if(id == (sf.triggerId+1)) { // done trigger
                 var start, length;
                 #start, length = sfview.selections[sfview.currentSelection];
                 "done!".postln;
@@ -532,7 +613,7 @@ SampleFileView : CompositeView {
                   playButton.value_(0);
                 };
 
-            };
+              };
             }.fork(AppClock);
           }, "/tr");
         };
@@ -579,7 +660,7 @@ SampleFileView : CompositeView {
 
 }
 
-
+// Extension of SoundFile with playback and metadata additions for working within Smpl library
 SampleFile : SoundFile {
 
   // Smpl Plumbing
@@ -649,7 +730,7 @@ SampleFile : SoundFile {
     if(rootpos.isNil) {
       ^nil;
     } {
-     ^dirnames[(rootpos+1)..]; // everything after the root directory
+      ^dirnames[(rootpos+1)..]; // everything after the root directory
     };
 
   }
@@ -665,9 +746,15 @@ SampleFile : SoundFile {
   }
 
 
-  // Play method for auditioning: should not be used in patterns or other timed musical applications.
-  // This method keeps only a single synth instance active and resets the playback position
-  // as needed. It works in tandem with SampleFileView to maintain cursor position and looping behavior.
+  /*
+  Play method ONLY FOR AUDITIONING or in tandem with SampleFileView
+
+  This method should not be used in patterns or other timed musical applications.
+  This method keeps only a single synth instance active and resets the playback position
+  as needed. It works in tandem with SampleFileView to maintain cursor position and looping behavior.
+
+  For musical applications use the `event` method to get an independent playable event.
+  */
   play {|server=nil, start=0, end=(-1), out=0, amp=1.0|
     var syn = if(numChannels == 2) { cursordef2ch } { cursordef1ch };
     if(server.isNil) { server = Server.default };
@@ -675,8 +762,8 @@ SampleFile : SoundFile {
     this.pr_checkBufferLoaded({^nil});
     if(end == -1) { end = this.numFrames };
     if(end-start > 1000) {
-    if(playNode.notNil) { playNode.free; playNode = nil };
-    playNode = Synth(syn, [\buf, buffer, \out, out, \amp, amp, \start, start, \end, end, \tid, triggerId, \loop, loop]);
+      if(playNode.notNil) { playNode.free; playNode = nil };
+      playNode = Synth(syn, [\buf, buffer, \out, out, \amp, amp, \start, start, \end, end, \tid, triggerId, \loop, loop]);
       ^this;
     } {
       ^nil;
@@ -772,6 +859,9 @@ SampleFile : SoundFile {
     ^"^(wav[e]?|aif[f]?)$".matchRegexp(path.extension.toLower);
   }
 
+  /*
+  Return a playback event that can be used in musical applications.
+  */
   event {|amp=0.5, startframe=0, endframe=(-1)|
     var sdef;
     this.pr_checkBufferLoaded({^nil});
@@ -817,23 +907,6 @@ SampleFile : SoundFile {
 
   bufnum { ^buffer.bufnum }
   asString { ^("SampleFile"+path) }
-
-  // cursor-linked view for gui interaction
-
-
-  getSampleFilePlayer {|server|
-    this.pr_checkServerAlive(server, { ^nil });
-    this.pr_checkBufferLoaded({^nil});
-    ^SampleFilePlayer.new(this, server)
-  }
-
-  loadAndPlay {|server, out=0, startframe=0, endframe=(-1), amp=1.0|
-    this.loadFileIntoBuffer(server, true,
-      {|buf|
-        ^this.getSamplePlayer(server).play(out,startframe,endframe,amp)
-    });
-  }
-
 
 }
 

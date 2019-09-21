@@ -30,7 +30,11 @@ Feature Requests from Reaper devs:
 - OSC actions with arguments
 
 
-
+NOTE:
+Assumes you have two IAC drivers set up
+"To Reaper"
+and
+"To SC"
 
 *******************************************/
 
@@ -49,7 +53,7 @@ r = Reaper.new("localhost", 8000);
 
 
 Rea {
-  classvar <>tracksById, <>tracksByName, <>tracks;
+  classvar <>tracksById, <>tracksByName, <>tr;
   classvar <oscfunc;
   classvar <reaperAddr;
   classvar <>verbose;
@@ -77,19 +81,22 @@ Rea {
     oscToReaper = NetAddr("localhost", 8000);
 
     tracksByName = Dictionary.new;
-    tracks = Dictionary.new;
+    tr = ();
     tracksById = Array.newClear(30);
   }
 
-  *tr {|name| ^tracks[name] }
-  *tr_ {|name, val| tracks[name] = val }
+  //****** MIDI ******//
+
+
+
+
 
   //***** Reaper/SC Control Commands *****//
 
   // linear fade of track volume
   // track 0 is the master track
   *fadeTrack {|tracknum=0, from=0, to=1.0, dur=1|
-    {
+    ^{
       // convert from linear float amplitude to Reaper DB
       // The 0dB point in reaper is 0.716
       from = from.ampdb.curvelin(-180, 0, 0.0, 0.716, -3.09);
@@ -102,7 +109,7 @@ Rea {
   }
 
   *pan {|tracknum=0, from=0.0, to=0.0, dur=1|
-    {
+    ^{
     // scale from SC panning to reaper panning (centered at 0.5)
     from = from.linlin(-1.0, 1.0, 0.0, 1.0);
     to = to.linlin(-1.0, 1.0, 0.0, 1.0);
@@ -117,6 +124,10 @@ Rea {
     oscToReaper.sendMsg("/track/%/fx/%/bypass".format(tracknum, fxnum), bypassval);
   }
 
+  *setFx {|tracknum=0, fxnum=0, fxparam=0, value=0.0|
+    oscToReaper.sendMsg("/track/%/fx/%/fxparam/%/value".format(tracknum, fxnum, fxparam), value);
+  }
+
   *mute {|tracknum=0, muteval=1|
     oscToReaper.sendMsg("/track/%/mute".format(tracknum), muteval);
   }
@@ -127,7 +138,7 @@ Rea {
 
   // input is in bpm
   *rampTempo {|clock, from=60, to=120, dur=1|
-    {
+    ^{
       from = from / 60;
       to = to / 60;
       Array.interpolation(100, from, to).do {|i|
@@ -224,9 +235,6 @@ Rea {
 
 
 }
-
-
-
 
 ReaperTrack {
   var <params;
