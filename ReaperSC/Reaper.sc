@@ -1,5 +1,4 @@
 /******************************************
-
 Control Reaper from SuperCollider
 
 2018 Jonathan Reus
@@ -83,6 +82,24 @@ Rea {
     tracksByName = Dictionary.new;
     tr = ();
     tracksById = Array.newClear(30);
+
+    this.addEventTypes();
+  }
+
+  *addEventTypes {
+
+    // General reaper midi instrument event
+    //  target instrument should listen on specified
+    //  midi channel, incoming on fromSC IAC bus
+    Event.addEventType(\reaperMidi, {|s|
+      ~chan = ~chan - 1; // channel numbering offset
+      if(Rea.midiToReaper.isNil) { Rea.init };
+      if(~note.class === Symbol) { ~freq = ~note.f };
+      ~midiout = Rea.midiToReaper;
+      ~type = \midi;
+      currentEnvironment.play;
+    }, (chan: 1, note: \c5, rootPitch: \c5.f, amp: 0.5));
+
   }
 
   //****** MIDI ******//
