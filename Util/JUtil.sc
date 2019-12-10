@@ -219,14 +219,6 @@ JLog {
     ^this;
   }
 
-  pseq {|rep=inf, off=0|
-    ^Pseq(this,rep,off);
-  }
-
-  prand {|rep=inf|
-    ^Prand(this, rep);
-  }
-
 }
 
 + Symbol {
