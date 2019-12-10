@@ -105,13 +105,13 @@ Project {
   }
 
 
-  *startup {|server=nil, verbose=false, showScenes=true, showMeters=true, limSamplesLocal, limSamplesGlobal, scOnly, rootpath=nil, scenedir=nil, localSamplePaths=nil, onBoot=nil|
+  *startup {|server=nil, verbose=false, showScenes=true, showMeters=true, limitSamplesLocal, limitSamplesGlobal, scOnly, rootpath=nil, scenedir=nil, localSamplePaths=nil, onBoot=nil|
 
-    if(limSamplesLocal.notNil) {
-      limitSamplesLocal = limSamplesLocal;
+    if(limitSamplesLocal.notNil) {
+      this.limitSamplesLocal = limitSamplesLocal;
     };
-    if(limSamplesGlobal.notNil) {
-      limitSamplesGlobal = limSamplesGlobal;
+    if(limitSamplesGlobal.notNil) {
+      this.limitSamplesGlobal = limitSamplesGlobal;
     };
 
     if(scOnly.notNil) { Project.scOnly = scOnly };
@@ -190,10 +190,10 @@ var win, styler, container, subview;
         // load server-dependent modules
         Syn.load;
         if(allsamples.value == true) {
-          limitSamplesGlobal = 50000;
-          limitSamplesLocal = 50000;
+          this.limitSamplesGlobal = 50000;
+          this.limitSamplesLocal = 50000;
         };
-        Smpl.load(server, verbose: verbose, limitLocal: limitSamplesLocal, limitGlobal: limitSamplesGlobal, localSamplePaths: localSamplePaths, doneFunc: {
+        Smpl.load(server, verbose: verbose, limitLocal: this.limitSamplesLocal, limitGlobal: this.limitSamplesGlobal, localSamplePaths: localSamplePaths, doneFunc: {
           if(showMeters) { this.meter };
           if(isReaperSim) { this.initAudioRouting } { Rea.init };
           if(onBoot.notNil) { onBoot.value };

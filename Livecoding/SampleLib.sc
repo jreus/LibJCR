@@ -105,11 +105,14 @@ Smpl {
     allGroups = List.new;
     allTags = List.new;
     globalSamplesPath = "~/_samples".absolutePath;
+  }
 
+  *pr_loadEventTypes {
     // General sample event for buffer playback
     Event.addEventType(\sample, {|s|
       var chans = ~buf.numChannels;
       if(~end.isNil) { ~end = ~buf.numFrames };
+      if(~dur == -1) { ~dur = ~buf.duration };
       if(chans == 1) {
         ~instrument = \pitchedSample1ch;
       } {
@@ -128,11 +131,6 @@ Smpl {
     }, ());
   }
 
-  *pr_loadEventTypes {
-
-
-  }
-
   // private method
   *pr_checkServerAlive {|errorFunc|
     activeServer = activeServer ? Server.default;
@@ -142,6 +140,9 @@ Smpl {
     };
   }
 
+  *samplesForGroup {|gr| ^samplesByGroup.at(gr.asSymbol).values.asList }
+  *sampleNamesForGroup {|gr| ^samplesByGroup.at(gr.asSymbol).keys.asList }
+
 
   // A global samples directory will be searched for at globalSamplesPath
   // All directories in the array localSamplePaths will be loaded
@@ -150,6 +151,7 @@ Smpl {
     var samplePath, loaded=0;
     activeServer = server;
     this.pr_checkServerAlive({^nil});
+    this.pr_loadEventTypes();
 
     if(File.exists(globalSamplesPath).not) { File.mkdir(globalSamplesPath) };
 
@@ -194,11 +196,11 @@ Smpl {
         res = this.pr_loadSampleAtPathName(path, lazyLoad, verbose);
         if(res.notNil) {
           if(verbose) {
-            "%[%: %]".format(res.id, path.folderName, path.fileName).postln;
+            "%[%: %]".format(res.name, path.folderName, path.fileName).postln;
           } { if(i%100 == 0) { ".".post } };
 
           tmplim = tmplim - 1;
-          if(tmplim == 0) { limitReached.value };
+          if(tmplim <= 0) { limitReached.value };
         };
       };
     };
@@ -298,11 +300,13 @@ Smpl {
 
   *gui {|alwaysOnTop=false|
     var styler, subStyler, decorator, childView, childDecorator, subView;
-    var searchText, searchList, autoPlayCB, txt;
+    var searchText, sampleList, autoPlayCB, txt;
     var searchGroupDropdown, searchTagDropdown;
     var findFunc, resetFunc;
-    var width=400, height=800, lineheight=20, searchListHeight=300, subWinHeight;
-    subWinHeight = height - searchListHeight - (lineheight*3);
+    var width=400, height=800, lineheight=20;
+    var sampleListHeight=300, subWinHeight;
+    var lastClick = Process.elapsedTime; // used for doubleclick detection
+    subWinHeight = height - sampleListHeight - (lineheight*3);
 
     this.pr_checkServerAlive({^nil});
 
@@ -330,7 +334,7 @@ Smpl {
     .items_(allTags.asArray.insert(0, "--")).stringColor_(Color.white)
     .background_(Color.clear);
 
-    searchList = ListView(childView, width@searchListHeight)
+    sampleList = ListView(childView, width@sampleListHeight)
     .items_(samples.values.collect({|it| it.name }).asArray.sort)
     .stringColor_(Color.white)
     .background_(Color.clear)
@@ -361,10 +365,10 @@ Smpl {
         };
         crit1 && crit2 && crit3;
       }, Array);
-      searchList.items_(filteredSamples.collect({|it| it.name}).sort);
+      sampleList.items_(filteredSamples.collect({|it| it.name}).sort);
       resetFunc.();
       subView.removeAll;
-      searchList.value_(0);
+      sampleList.value_(0);
     };
 
     searchText.action = { |st| findFunc.(st.value) };
@@ -376,14 +380,25 @@ Smpl {
     subStyler = GUIStyler(childView); // configure substyler...?
     subView = subStyler.getView("Sample Info", Rect(0,0,width,subWinHeight), scroll: true);
 
-    searchList.mouseUpAction_({|sl|
+    // SINGLE & DOUBLE CLICK ACTION FOR SAMPLE LIST
+    sampleList.mouseUpAction_({|sl|
+      var now, thresh = 0.3, sample;
+      now = Process.elapsedTime;
+      if((now - lastClick) < thresh) {
+        // Double Click, copy sample name to open document
+        var doc = Document.current;
+        sample = sl.items[sl.value];
+        doc.insertAtCursor("\"%\"".format(sample));
+      };
+      lastClick = now;
+
       if(subView.children.size == 0) { // a rare case, when after a search there is no active subview
         sl.action.value(sl);
       }
     });
 
     // NEW SAMPLEFILE SELECT ACTION
-    searchList.action_({ |sl|
+    sampleList.action_({ |sl|
       var sf, sfplayer, id, s_info, btn, txt, check, sfview, insertButton, insertEventBtn, insertArrayBtn, insertPathBtn;
       var playbut, tagfield;
       var playFunc, stopFunc;

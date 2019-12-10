@@ -10,8 +10,7 @@ info@jonathanreus.com
 
 /*
 
-Generates a node proxy representing an envelope, whose bus can be mapped to a parameter.
-The existance of the pattern value is duration-based. And will hold the final value.
+Generates a node proxy representing an envelope, whose bus can be mapped to a parameter. The existance of the pattern value is duration-based. And will hold the final value.
 
 Uses control rate.
 
@@ -36,13 +35,24 @@ Pinterpolate {
 }
 
 
+
 /*
 Array shortcut functions for generating patterns
 */
 + ArrayedCollection {
-	seq {|repeats=inf, offset=0|
-		^Pseq(this, repeats, offset);
-	}
+
+  pseq {|rep=1, off=0, every=1, restDur=1|
+    var arr = this;
+    if(every > 1) {
+      arr = this.extend(this.size * every, Rest(restDur));
+      rep = rep / every;
+    };
+    ^Pseq(arr,rep,off);
+  }
+
+  prand {|rep=inf|
+    ^Prand(this, rep);
+  }
+
+
 }
-
-

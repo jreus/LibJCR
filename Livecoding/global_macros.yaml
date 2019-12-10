@@ -1,18 +1,43 @@
 # Global Macros
 pdef: 
- rewriteFunc: '{|input,args|
-					if(~nMacroPdefs.notNil) { ~nMacroPdefs = ~nMacroPdefs + 1 } { ~nMacroPdefs = 0 };
+ rewritePattern: "
+
+(
+
+Pdef(\\p@1@, Pbind(*[
+
+instrument: \\default,
+
+amp: 0.5, 
+
+dur: 1/2, 
+
+delta: 1/2, 
+
+root: 0, 
+
+octave: 4, 
+
+scale: Scale.lydian, 
+
+//note: 0, 
+
+degree: Pseq((0..7), inf), 
+
+out: 0, 
+
+]));
+
+);
+
+Pdef(\\p@1@).play(TempoClock, quant: TempoClock.beatsPerBar);
+
+Pbindef(\\p@1@, \\amp, 0.5, \\note, Pseq((0..12), inf));
+
+Pdef(\\p@1@).pause;
+
 "
-Pdef(\\p%).clear;
-(\n
-Pdef(\\p%, {arg amp=1.0, pan=0;\n
-\tvar sig;\n
-\tsig = SinOsc.ar(440) * EnvGen.ar(Env.perc, Impulse.ar(1));\n
-});\n
-);\n
-Ndef(\\p%).play(out:0, numChannels: 1);\n".format(~nMacroPdefs, ~nMacroPdefs, ~nMacroPdefs);
-			}'
- inputPattern: "pdef"
+ inputPattern: "pdef([0-9]+)"
  type: "rewrite"
 boot: 
  rewritePattern: "(

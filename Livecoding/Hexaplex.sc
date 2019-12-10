@@ -12,7 +12,7 @@ https://www.gnu.org/licenses/
 _____________________________________________________________
 Hexaplex
 
-A lightweight livecoding language.
+A lightweight livecoding language Project container
 
 @usage
 Xex.start(sampleBanks: []);
