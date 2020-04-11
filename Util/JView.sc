@@ -151,16 +151,26 @@ RadioButton : UserView {
             Pen.color = this.traceColor;
             Pen.addRect(Rect(inw,inh,width-(2*inw),height-(2*inh)));
             Pen.stroke;
-
             if(selected) {
               Pen.width_(width/20 + 1);
-
-              Pen.line(0@(height/3), (width/2)@(height/1.1));
-              Pen.line((width/2)@(height/1.1), width@0);
+							Pen.line((inw*2)@(height/4), (width/2)@(height-(2*inh)));
+							Pen.line((width/2)@(height-(2*inh)), (width-(2*inw))@(height/4));
               Pen.stroke;
             };
 
-          }
+          },
+		  \box, {
+            inw = inw * 0.4; inh = inh * 0.4;
+            Pen.color = this.traceColor;
+            Pen.addRect(Rect(inw,inh,width-(2*inw),height-(2*inh)));
+            Pen.stroke;
+
+            if(selected) {
+			Pen.addRect(Rect(inw*3, inh*3, width-(6*inw), height-(6*inh)));
+            Pen.fill;
+            };
+
+          },
         );
 
       };

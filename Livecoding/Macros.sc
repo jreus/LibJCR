@@ -63,7 +63,7 @@ Macros.active_(false); // disable macros
 
 
 Macros {
-  classvar <isActive;
+  classvar <preprocessorActive; // indicates whether Macros are evaluated automatically in the SC preprocessor
   classvar <names; // ordered list of Macro names
   classvar <dict; // global dictionary of Macros by name
   classvar <byInputPattern; // dictionary of Macros by eval string
@@ -143,9 +143,7 @@ Macros {
         };
       };
     };
-
     names.sort;
-    this.active_(true);
   }
 
   *at {|name| ^this.dict[name] }
@@ -290,17 +288,6 @@ Pdef(\\p@1@).pause;\n
     File.use(filePath, "w", {|fp| doc.write(fp) });
   }
 
-  addPreProcessorFunc {arg newfunc;
-    preProcessorFunc = newfunc;
-  }
-
-  *clearPreProcessorFunc {
-    preProcessorFunc = nil;
-  }
-
-  *active {
-    ^isActive;
-  }
 
   /*
   Evaluate macros on the given line number in the active Document
@@ -344,7 +331,7 @@ Pdef(\\p@1@).pause;\n
   }
 
   // TODO: USE THIS FUNCTION AS THE BASIS FOR ALL MACRO PARSING!
-  // Parse the string for macros.
+  // Parse the string for macros. Assumes a prefixstring.
   // Evaluate all side effects and return the resulting rewritten text, if any.
   *eval {|codeStr|
     var result=nil;
@@ -438,8 +425,18 @@ Pdef(\\p@1@).pause;\n
   }
 
 
+  *clearPreProcessorFunc {
+    preProcessorFunc = nil;
+  }
+
+  *preprocessor {
+    ^preprocessorActive;
+  }
+
+
   // TODO:: UPDATE THIS FUNCTION TO USE Macros.eval AS THE BASIS FOR THE PREPROCESSOR
-  *active_ {|val=true|
+  // enables macros globally as part of the SC preprocessor
+  *preprocessor_ {|val=true|
     var prefunc = nil;
     if(val == true) {
 
@@ -551,8 +548,8 @@ Pdef(\\p@1@).pause;\n
       // TODO: set the preProcessor to preProcessorFuncs when macros are disabled?
     };
     thisProcess.interpreter.preProcessor = prefunc;
-    isActive = val;
-    if(isActive) {  this.postMacros } { "Macros disabled".postln };
+    preprocessorActive = val;
+    if(preprocessorActive) {  this.postMacros } { "Preprocessor Macros disabled".postln };
     ^this;
   }
 

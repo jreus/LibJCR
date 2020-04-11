@@ -59,27 +59,26 @@ x = Syn.load();
 x.gui;
 */
 Syn {
-	classvar <synthdefs, <>path, <synthsFolderPath, <synthsFullPath, <fileNames;
+	classvar <synthdefs, <>synthdefsPath, <synthdefFilePaths, <fileNames;
 	classvar <guiWindow;
 	classvar <allNames, <allTypes;
 
 	*load { |synthDefsPath, server|
 		var sp;
 		if (synthDefsPath.isNil) {
-			path = 	"~/Drive/DEV/SC_Synthesis/".asAbsolutePath; // put your synthdef library path here
+			Error("No synthdefs search path provided to Syn.load").throw;
 		} {
-			path = synthDefsPath;
+			synthdefsPath = synthDefsPath;
 		};
 		if(server.isNil) { server = Server.default };
 		fileNames = List();
 		allNames = List();
 		allTypes = List();
 		synthdefs = Dictionary.new; // add synthdefs hashed on name
-		synthsFolderPath = path +/+ "SynthDefs";
-		synthsFullPath = ( synthsFolderPath +/+ "*").pathMatch;
+		synthdefFilePaths = ( synthdefsPath +/+ "*").pathMatch;
 
 		/*** PARSE SYNTH LIBRARY FILES ***/
-		synthsFullPath.do{|filepath|
+		synthdefFilePaths.do{|filepath|
 			var kw1,kw2,kw3; // keyword locations
 			var fulltext,tmp1,tmp2;
 			fulltext = File.readAllString(filepath);

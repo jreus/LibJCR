@@ -127,7 +127,6 @@ Scenes {
 
     // child view inside window, this is where all the gui views sit
     childView = styler.getView("Scenes", win.view.bounds, gap: 10@10);
-
     addBtn = styler.getSizableButton(childView, "add", size: 30@lineheight);
     deleteBtn = styler.getSizableButton(childView, "del", size: 30@lineheight);
     renameBtn = styler.getSizableButton(childView, "rename", size: 40@lineheight);
@@ -238,7 +237,6 @@ Scenes {
 
     subStyler = GUIStyler(childView); // styler for subwindow
     subView = subStyler.getView("Subwindow", Rect(0,0,width,height/2)); // subwindow
-
 
     // SCENELIST DoubleClick Action
     sceneList.mouseUpAction = {
