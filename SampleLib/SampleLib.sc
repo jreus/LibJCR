@@ -134,7 +134,7 @@ Smpl {
 			};
 			~type = \note;
 			currentEnvironment.play;
-		}, (freq: \c5.f, rootPitch: \c5.f, rate: 1.0, atk: 0.01, rel: 0.01, start: 0, out: 0, loops: 1, dur: -1));
+		}, (freq: \c5.f, rootPitch: \c5.f, rate: 1.0, atk: 0.01, rel: 0.01, start: 0, outbus: 0, loops: 1, dur: -1));
 
 		// Playback event for Smpl library
 		Event.addEventType(\smpl, {|s|
@@ -158,15 +158,15 @@ Smpl {
 			playhead = EnvGen.ar(Env([0, start, end],[0, dur]), t_loop);
 			sig = BufRd.ar(1, buf, playhead);
 			// Free on gate release
-			sig = sig * EnvGen.ar(Env.asr(atk, 1.0, rel), gate: gate, doneAction: 0);
+			sig = sig * EnvGen.ar(Env.asr(atk, 1.0, rel), gate: gate, doneAction: 2);
 			// free on silence...
-			DetectSilence.ar(sig, 0.0001, 0.5, doneAction: Done.freeSelf);
+			//DetectSilence.ar(sig, 0.0001, 0.5, doneAction: Done.freeSelf);
 			sig = Mix.ar(sig);
 			sig = BLowPass4.ar(sig, co, rq);
 			Out.ar(out, Pan2.ar(sig,pan) * amp);
 		}).add;
 
-		SynthDef('smpl_pitchedSample2ch', {arg amp=0.5, rate=1, freq=400, rootPitch=400, start=0, end, buf, out, gate=1, pan=0, atk=0.01, rel=0.01, co=2000, rq=1.0, loops=1;
+		SynthDef('smpl_pitchedSample2ch', {|amp=0.5, rate=1, freq=261.62556, rootPitch=261.62556, start=0, end, buf, out, gate=1, atk=0.01, pan=0.0, rel=0.01, co=20000, rq=1.0, loops=1|
 			var sig, playhead, dur, prate;
 			var t_cnt = 0, t_loop = 0, mute=1;
 			prate = rate * freq / rootPitch;
@@ -178,12 +178,12 @@ Smpl {
 			playhead = EnvGen.ar(Env([0, start, end],[0, dur]), t_loop);
 			sig = BufRd.ar(2, buf, playhead);
 			// Free on gate release
-			// sig = sig * EnvGen.ar(Env.asr(atk, 1.0, rel), gate: gate, doneAction: 2);
+			sig = sig * EnvGen.ar(Env.asr(atk, 1.0, rel), gate: gate, doneAction: 2);
 			// Alternatively, free on silence...
-			DetectSilence.ar(sig, 0.0001, 0.5, doneAction: Done.freeSelf);
-			sig = Mix.ar(sig);
+			//DetectSilence.ar(sig, 0.0001, 0.5, doneAction: Done.freeSelf);
 			sig = BLowPass4.ar(sig, co, rq);
-			Out.ar(out, Pan2.ar(sig,pan) * amp);
+			sig = Pan2.ar(sig[0], (pan-1).clip(-1,1)) + Pan2.ar(sig[1], (pan+1).clip(-1,1));
+			Out.ar(out, sig * amp);
 		}).add;
 
 	}
@@ -201,7 +201,7 @@ Smpl {
 	*loadGroupAndGetNames {|gr, serv|
 		gr = samplesByGroup.at(gr.asSymbol);
 		if(gr.notNil) {
-			^gr.values.collect {|samplefile|
+			^gr.values.sort({|a,b| a.name < b.name }).collect {|samplefile|
 				samplefile.loadFileIntoBuffer(serv);
 				samplefile.name; // return id
 			};
@@ -213,7 +213,7 @@ Smpl {
 	*samplesForGroup {|gr|
 		gr = samplesByGroup.at(gr.asSymbol);
 		if(gr.notNil) {
-			^gr.values.asList;
+			^gr.values.sort({|a,b| a.name < b.name });
 		} {
 			^nil;
 		};
@@ -222,7 +222,7 @@ Smpl {
 	*sampleNamesForGroup {|gr|
 		gr = samplesByGroup.at(gr.asSymbol);
 		if(gr.notNil) {
-			^gr.keys.asList;
+			^gr.keys.asList.sort;
 		} {
 			^nil;
 		};
@@ -245,7 +245,7 @@ Smpl {
 			"\nSmpl: Loading Local Sample Banks ...".postln;
 			localSamplePaths.do {|samplePath|
 				samplePath = PathName.new(samplePath);
-				loaded = loaded + this.pr_loadSamples(samplePath, lazyLoadLocal, verbose, limitLocal-loaded);
+				loaded = loaded + this.pr_loadSamples(samplePath, lazyLoadLocal, verbose, limitLocal - loaded);
 				".%.".format(samplePath.folderName).post;
 			};
 			"\nSmpl: % samples loaded".format(loaded).postln;
@@ -364,7 +364,9 @@ Smpl {
 			^nil
 		};
 		if(autoload) {
-			sample.loadFileIntoBuffer(action:loadAction);
+			if(sample.buffer.isNil) {
+				sample.loadFileIntoBuffer(action:loadAction);
+			};
 		};
 		^sample;
 	}
@@ -386,7 +388,11 @@ Smpl {
 	// Get the root pitch for a given sample
 	// TODO: not implemented yet!
 	*rootPitch {|id|
-		^\c5;
+		if(this.samples[id].notNil) {
+			^this.samples[id].rootPitch;
+		} {
+			^nil;
+		};
 	}
 
 	*gui {|alwaysOnTop=false|
@@ -779,6 +785,7 @@ SampleFile : SoundFile {
 
 	// ** Metadata **
 	var <>name, <tags, <>library, <folderGroups;  // belongs to a sample library, name of library
+	var <>rootPitch;
 
 	// FUTURE:: fancier analysis-related things
 	var frequency_profile;
@@ -814,10 +821,11 @@ SampleFile : SoundFile {
 	@path A PathName
 	NOTE: This needs to be redone to return an instance of SampleFile, I might actually need to rewrite SoundFile
 	*/
-	*openRead {|path| if(this.isSoundFile(path)) { ^super.new.init(path) } { ^nil } }
+	*openRead {|path, rootPitch| if(this.isSoundFile(path)) { ^super.new.init(path, rootPitch) } { ^nil } }
 
 	// path is of type PathName
-	init {|path|
+	init {|path, rootpitch|
+		var rx;
 		triggerId = nextTriggerId;
 		nextTriggerId = nextTriggerId + 2;
 
@@ -828,6 +836,19 @@ SampleFile : SoundFile {
 		// TODO: Should load tags and other info from external metadata file here
 		name = path.fileNameWithoutExtension.replace(" ","");
 
+		if(rootpitch.isNil) {
+			// Get root pitch from filename
+			if(name.size > 3) {
+				rx = name[name.size-3..].findRegexp("([a-g][sb]?[0-9])");
+				if(rx.size > 0) {
+					rootpitch = rx[0][1].asSymbol;
+				};
+			};
+		};
+		if(rootpitch.isNil) {
+			rootpitch = \c5;
+		};
+		rootPitch = rootpitch;
 	}
 
 	// path is of type PathName
@@ -884,7 +905,7 @@ SampleFile : SoundFile {
 
 	loop_ {|bool=false|
 		loop = bool;
-		if(playNode.notNil) { playNode.set(\loop, loop.asInt) };
+		if(playNode.notNil) { playNode.set(\loop, loop.asInteger) };
 	}
 
 
@@ -986,7 +1007,38 @@ SampleFile : SoundFile {
 		^"(type: 'smpl', amp: %, start: %, end: %, smpl: \"%\", loops: 1)".format(amp, startframe, endframe, this.name);
 	}
 
+	// Get stereo buffer as mono buffer
+	// @param mixmode Mix stereo buffer down to mono \left, \right, \mix
+	asMonoBuffer {|server, mixmode=\mix, doneAction=nil|
+		this.pr_checkBufferLoaded({^nil});
+		"Buffer Loaded: CHECK".postln;
+		if(buffer.numChannels == 2) {
+			var monobuf = Buffer.alloc(server, buffer.numFrames, 1);
+			"Stereo buf, mono buffer allocated".postln;
+			buffer.normalize.loadToFloatArray(action: {|arr|
+				var monomix;
+				"Loading into float array...".postln;
+				monomix = Array.newClear(arr.size / 2).collect {|it, idx|
+					switch(mixmode,
+						\right, { arr[idx*2] },
+						\left, { arr[idx*2 + 1] },
+						\mix, { arr[idx*2] + arr[idx*2 + 1] },
+						{ Error("Invalid mixdown option % when loading sample %".format(monomix, this)).throw; }
+					);
+				};
+				"Array collected and buf is %".format(monobuf).postln;
+				monobuf.loadCollection(monomix.normalize(-1,1), 0, { "Loaded mono buf".postln });
+				"Success!".postln;
+			});
+			^monobuf;
+		} {
+			^buffer;
+		};
+	}
+
+
 	/*
+	loadFileIntoBuffer
 	@param server The server to load this buffer into
 	@param action Function to be evaluated once the file has been loaded into the server. Function is passed the buffer as an argument.
 	*/
@@ -996,8 +1048,11 @@ SampleFile : SoundFile {
 		this.pr_checkServerAlive(server, { ^nil });
 		SampleFile.loadSynthDefs; // TODO: maybe not needed, should be done in Smpl
 		newaction = action;
-		if(buffer.notNil) { newaction.value(buffer) }
-		{ // allocate new buffer
+		if(buffer.notNil) {
+			// buffer exists, run action but do not allocate
+			"Buffer % already exists".format(buffer).warn;
+			newaction.value(buffer);
+		} {
 			newbuf = Buffer.read(server, this.path, action: newaction);
 			buffer = newbuf;
 		};

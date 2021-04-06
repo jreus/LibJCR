@@ -59,12 +59,17 @@ x = Syn.load();
 x.gui;
 */
 Syn {
+	classvar <>defaultSynthPath;
 	classvar <synthdefs, <>synthdefsPath, <synthdefFilePaths, <fileNames;
 	classvar <guiWindow;
 	classvar <allNames, <allTypes;
 
+	*initClass {
+		defaultSynthPath = "/home/jon/Dev/_LIB/SC_Synthesis/SynthDefs";
+	}
+
 	*load { |synthDefsPath, server|
-		var sp;
+		var sp, stats;
 		if (synthDefsPath.isNil) {
 			Error("No synthdefs search path provided to Syn.load").throw;
 		} {
@@ -78,6 +83,7 @@ Syn {
 		synthdefFilePaths = ( synthdefsPath +/+ "*").pathMatch;
 
 		/*** PARSE SYNTH LIBRARY FILES ***/
+		stats = [0, 0]; // files / synths
 		synthdefFilePaths.do{|filepath|
 			var kw1,kw2,kw3; // keyword locations
 			var fulltext,tmp1,tmp2;
@@ -119,8 +125,10 @@ Syn {
 				info.parseDocString(metatext, filepath);
 				synthdefs[name] = info;
 				allNames.add(name);
+				stats[1] = stats[1] + 1; // add synth
 			};
 			fileNames.add(PathName.new(filepath).fileName);
+			stats[0] = stats[0] + 1; // add file
 		};
 
 		// Collect all types
@@ -133,7 +141,7 @@ Syn {
 		allTypes = allTypes.asList.sort;
 		allNames = allNames.sort;
 
-		"... Parsed Synth Library ...".postln;
+		"... Parsed % synthdefs in % files ...".format(stats[1], stats[0]).warn;
 		/*** END PARSE SYNTH LIBRARY FILES ***/
 	}
 

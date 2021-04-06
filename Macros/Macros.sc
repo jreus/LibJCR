@@ -127,7 +127,8 @@ Macros {
       defaultLocalMacroPath = macroPath +/+ "local_macros.yaml";
       "LOCAL MACRO PATH: %\n".format(defaultLocalMacroPath).postln;
       if(File.exists(macroPath).not) { File.mkdir(macroPath) };
-      if(File.exists(defaultLocalMacroPath).not) {
+
+	  if(File.exists(defaultLocalMacroPath).not) {
         File.use(defaultLocalMacroPath, "w",
           {|fp| fp.write("# Local Macros\n")})
       };

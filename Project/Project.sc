@@ -28,6 +28,7 @@ z = Scenes(f).makeGui;
 ________________________________________________________________*/
 
 Project {
+	classvar <>defaultSynthPath;
 	classvar <>samplerates;
 	classvar <>blocksizes;
 	classvar <>devicepreference;
@@ -55,6 +56,7 @@ Project {
 			"Project reset".warn;
 			MPK.initMidiFuncs;
 		};
+		defaultSynthPath = "~/Dev/_LIB/SC_Synthesis/SynthDefs".absolutePath;
 	}
 
 	*meter {|server|
@@ -103,30 +105,30 @@ Project {
 		this.resetAction.();
 	}
 
-	*startup {|server=nil, verbose=false, showScenes=true, enableMacroPreprocessor=false, showMeters=true, limitSamplesLocal, limitSamplesGlobal, audioChainActive=false, reaperBridgeActive=false, synthPath=nil, rootPath=nil, scenedir=nil, localSamplePaths=nil, onBoot=nil|
+	*startup {|server=nil, verbose=false, scenes=true, meters=true, macros=false, slimLocal, slimGlobal, mixer=false, reaper=false, synthPath=nil, rootPath=nil, localSamplePaths=nil, onBoot=nil|
 
-		if(limitSamplesLocal.notNil) {
-			this.limitSamplesLocal = limitSamplesLocal;
+		if(slimLocal.notNil) {
+			this.limitSamplesLocal = slimLocal;
 		};
-		if(limitSamplesGlobal.notNil) {
-			this.limitSamplesGlobal = limitSamplesGlobal;
+		if(slimGlobal.notNil) {
+			this.limitSamplesGlobal = slimGlobal;
 		};
 
-		if(audioChainActive.notNil) { audioChain = audioChainActive };
-		if(reaperBridgeActive.notNil) { reaperBridge = reaperBridgeActive };
+		if(mixer.notNil) { audioChain = mixer };
+		if(reaper.notNil) { reaperBridge = reaper };
+
+		if(rootPath.isNil) { "`rootPath` must specify a valid project root directory in Project.startup".throw };
 
 		// Init non-server dependent modules
-		Scenes.init(rootPath, scenedir);
-		Macros.load(Scenes.rootPath +/+ "_macros/");
-		if(enableMacroPreprocessor == true) { Macros.preprocessor = true };
-		if(showScenes) { Scenes.gui };
-
+		Scenes.init(rootPath, rootPath +/+ "_scenes/");
+		Macros.load(rootPath +/+ "_macros/");
+		if(macros == true) { Macros.preprocessor = true };
+		if(scenes) { Scenes.gui };
 		if(localSamplePaths.isNil) { // use default project structure local samples directory
-			localSamplePaths = [Scenes.rootPath +/+ "_samples/"];
+			localSamplePaths = [rootPath +/+ "_samples/"];
 			if(File.exists(localSamplePaths[0]).not) { File.mkdir(localSamplePaths[0]) };
 		};
-
-		Project.pr_makeStartupWindow(server, localSamplePaths, synthPath, onBoot, showMeters, verbose);
+		Project.pr_makeStartupWindow(server, localSamplePaths, synthPath, onBoot, meters, verbose);
 	}
 
 
@@ -134,6 +136,10 @@ Project {
 		var win, styler, container, subview;
 		var srdropdown, bsdropdown, devlist, yesbut, nobut;
 		var audiochain, reaperbridge, allsamples;
+
+		if(synthPath.isNil) {
+			synthPath = defaultSynthPath;
+		};
 
 
 		if(server.isNil) { server = Server.default };
@@ -147,14 +153,16 @@ Project {
 		bsdropdown = PopUpMenu(container, 60@20).items_(blocksizes).value_(4);
 		styler.getSizableText(container, "device", 55, \right, 14);
 		devlist = PopUpMenu.new(container, Rect(0, 0, 210, 30)).font_(Font("Arial", 16));
-		Platform.case(\linux,
-			{
-				"You are using LINUX".warn;
+		Platform.case(
+		\linux, {
+				"Loading audio device options for LINUX".warn;
 				devlist.items_(["JACK"]);
 			},
-			{
-				"You are not using OSX or WINDOWS".warn;
+		\osx, {
+				"Loading audio device options for OSX".warn;
 				devlist.items_(ServerOptions.devices.sort);
+			}, {
+				Error("Unknown device configuration for OS").throw;
 			},
 		);
 
@@ -185,17 +193,18 @@ Project {
 			server.options.numInputBusChannels = 20;
 			server.options.numOutputBusChannels = 20;
 			server.options.memSize = memSize;
-			server.options.blockSize = bsdropdown.item.asInt;
-			server.options.sampleRate = srdropdown.item.asInt;
+			server.options.blockSize = bsdropdown.item.asInteger;
+			server.options.sampleRate = srdropdown.item.asInteger;
 			server.options.numWireBufs = 512 * 2;
 			server.options.numBuffers = numBuffers;
 			win.close;
 			"BOOT: % %  %".format(
-				srdropdown.item.asInt, bsdropdown.item.asInt,
+				srdropdown.item.asInteger, bsdropdown.item.asInteger,
 				devlist.items[devlist.value]
 			).warn;
 			server.waitForBoot { // load server-dependent modules
 				// SYNTH LIBRARY
+				"LOADING SYNTH LIBRARY AT %".format(synthPath).warn;
 				Syn.load(synthPath);
 				if(allsamples.value == true) {
 					this.limitSamplesGlobal = 50000;

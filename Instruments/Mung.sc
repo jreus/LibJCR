@@ -30,15 +30,15 @@ Mung {
 	/*
 	@param buffers A list of buffers to be included in the grain munger.
 	*/
-	*new {arg chans=1, buffers;
+	*new {|chans=1, buffers|
 		^super.new.init(chans, buffers);
 	}
 
-	init {arg chans, buffers;
+	init {|chans, buffers|
 		bufs = List.new;
 		chan = chans;
 		out = 0;
-		buffers.do {arg buf;
+		buffers.do {|buf|
 			bufs.add(buf);
 		};
 

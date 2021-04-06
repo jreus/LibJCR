@@ -183,7 +183,12 @@ Etc.
   }
 }
 
-
++ String {
+	// specific runInTerminal using gnome-terminal
+	runInMintTerminal {
+		"gnome-terminal -- bash -c \"%; exec bash\"".format(this.shellQuote).unixCmd;
+	}
+}
 
 
 /*------------------------------------
@@ -210,13 +215,13 @@ Date.getDate.daysDiff(Date.fromStamp(e))
     if(dts.isNil.or { dts.isKindOf(String).not.or { dts.size != 13 } }) {
       throw("Bad Time Stamp Format %".format(dts));
     };
-    year = dts[..1].asInt;
+    year = dts[..1].asInteger;
     year = if(year<70) { year+2000 } { year+1900 };
-    month = dts[2..3].asInt;
-    day = dts[4..5].asInt;
-    hour = dts[7..8].asInt;
-    minute = dts[9..10].asInt;
-    second = dts[11..12].asInt;
+    month = dts[2..3].asInteger;
+    day = dts[4..5].asInteger;
+    hour = dts[7..8].asInteger;
+    minute = dts[9..10].asInteger;
+    second = dts[11..12].asInteger;
    // dayOfWeek = ; // TODO
     this.calcSecondsSinceEpoch;
   }
@@ -235,12 +240,12 @@ Date.getDate.daysDiff(Date.fromStamp(e))
   daysSinceEpoch {
     var era, yoe, doy, doe, res;
     var y=year,m=month,d=day;
-    y = y - (m <= 2).asInt;
+    y = y - (m <= 2).asInteger;
     era = if(y>=0) {y} {y-399}; era = era / 400;
     yoe = y - (era * 400);      // [0, 399]
     doy = (153*(m + (m > 2).if({-3},{9})) + 2)/5 + d-1;  // [0, 365]
     doe = yoe * 365 + yoe/4 - yoe/100 + doy;         // [0, 146096]
-    res = era * 146097 + doe.asInt - 719468;
+    res = era * 146097 + doe.asInteger - 719468;
     ^res;
   }
 
@@ -280,7 +285,12 @@ and RAPID PLAYBACK
 }
 
 + String {
-  notecps { ^this.tomidi.midicps; }
+  notecps {
+		if([\rest, \rr, \r].includes(this.asSymbol)) {
+			^Rest();
+		};
+		^this.tomidi.midicps;
+  }
 
   f { ^this.notecps; } // to frequency
 
@@ -317,10 +327,11 @@ and RAPID PLAYBACK
 	^(twelves + ones);
   }
 
-
   // Convert a string of note values
   // to an array of note symbols
   // "ab2 bb2 c3" becomes [\ab2, \bb2, \c3]
+  // chords can be represented by slashes
+  // "ab2/bb2/c3 d4 eb4/c5" becomes [[\ab2, \bb2, \c3], \d4, [\eb4, \c5]]
   notes {
     var res;
     var register = 5;
@@ -329,27 +340,27 @@ and RAPID PLAYBACK
     res = res.split($ );
     res = res.collect {|notestr|
       var notesymbol, notereg;
-      if(["r", "rest", "rr"].includesEqual(notestr)) {
-        notesymbol = \rr
-      } {
-        if([$&, $b, $f].includes(notestr[1])) {
-          notestr[1] = $b;
-        };
-        if([$#, $s].includes(notestr[1])) {
-          notestr[1] = $s;
-        };
-        if(notestr.wrapAt(-1).isInteger) {
-          register = notestr.wrapAt(-1).asString.asInt;
-        } {
-          notestr = notestr ++ register;
-        };
-        notesymbol = notestr.asSymbol;
-      };
+	  if(notestr.includes($/)) { // chord
+			notesymbol = notestr.split($/).collect {|noteval| noteval.notes };
+	  } {
+			if(["r", "rest", "rr"].includesEqual(notestr)) {
+				notesymbol = \rr
+			} {
+				if([$&, $b, $f].includes(notestr[1])) { notestr[1] = $b };
+				if([$#, $s].includes(notestr[1])) { notestr[1] = $s };
+				if(notestr.wrapAt(-1).isInteger) {
+					register = notestr.wrapAt(-1).asString.asInteger;
+				} {
+					notestr = notestr ++ register;
+				};
+				notesymbol = notestr.asSymbol;
+			};
+		};
       notesymbol;
     };
+	if(res.size == 1) { res = res[0] };
     ^res;
   }
-
 
   // Convert a string of numbers - fractional or decimal - into an array of durations
   // "1/2 0.23 1" becomes [0.5, 0.23, 1]
@@ -488,7 +499,15 @@ and RAPID PLAYBACK
 	^(notes[midi%12] ++ midi.div(12)).asSymbol
   }
 
+  // Converts from frequency to note symbol
+	note {
+		^this.cpsmidi.midinote;
+	}
+
 }
+
+
+
 
 /* ------------
 Collections
@@ -499,6 +518,8 @@ Collections
   f { ^this.collect(_.f); }
 
   m { ^this.collect(_.m); }
+
+  note { ^this.collect(_.note); }
 
   play {|amp, pan, dur=0.5, delta=0.6|
     {
