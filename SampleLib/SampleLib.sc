@@ -83,8 +83,8 @@ Smpl {
 	classvar <allGroups, <allTags; // lists of all available sample groups and tags
 	classvar <localSamples;
 	classvar <globalSamples;
-	classvar <globalSamplesPath; // global samples directory
-	classvar <localSamplesPath; // local samples directory
+	classvar <>globalSamplesPath; // global samples directory
+	classvar <>localSamplesPath; // local samples directory
 
 	classvar <activeServer; // server where buffers are allocated and loaded, should be set on load
 	classvar <listenerGroup; // a group at the head of the server where recording synths go
@@ -114,7 +114,7 @@ Smpl {
 		liveSamplesByName = Dictionary.new;
 		allGroups = List.new;
 		allTags = List.new;
-		globalSamplesPath = "~/_samples".absolutePath;
+		globalSamplesPath = "~/_assets/_samples/".absolutePath;
 		this.pr_loadEventTypes;
 	}
 
@@ -277,13 +277,13 @@ Smpl {
 		"LOAD SYNTHDEFS".warn;
 		this.pr_loadSynthDefs(server);
 
-		"LOAD LIVESAMPLES".warn;
+		"ALLOCATE LIVESAMPLE BUFFERS".warn;
 		this.pr_allocateLiveSampleBuffers(server);
 
-		"LOAD SAMPLEFILE SYNTHDEFS".warn;
+		"LOAD SAMPLE PLAYBACK SYNTHDEFS".warn;
 		SampleFile.loadSynthDefs(server);
 
-		"LOAD LIVESAMPLE SYNTHDEFS".warn;
+		"LOAD LIVESAMPLE CAPTURE SYNTHDEFS".warn;
 		LiveSample.loadSynthDefs(server);
 
 		if(File.exists(globalSamplesPath).not) { File.mkdir(globalSamplesPath) };
@@ -295,14 +295,14 @@ Smpl {
 				loaded = loaded + this.pr_loadSamples(samplePath, lazyLoadLocal, verbose, limitLocal - loaded);
 				".%.".format(samplePath.folderName).post;
 			};
-			"\nSmpl: % samples loaded".format(loaded).postln;
+			"\nSmpl: % samples loadefileNameWithoutExtensiond".format(loaded).postln;
 		} { "Smpl: No local sample paths provided".postln };
 
 
 		// Load samples from global directory
 		"\nSmpl: Loading Global Samples at %".format(globalSamplesPath).postln;
 		samplePath = PathName.new(globalSamplesPath);
-		loaded = this.pr_loadSamples(samplePath, lazyLoadGlobal, verbose, limitGlobal);
+		loaded = this.pr_loadSamples(samplePath, lazyLoadGlobal, verbose, limitGlobal, "_glo");
 		"\nSmpl: % samples loaded".format(loaded).postln;
 
 		// Collect groups and tags
@@ -326,7 +326,7 @@ Smpl {
 		res = block {|limitReached|
 			samplePath.filesDo {|path,i|
 				var res;
-				res = this.pr_loadSampleAtPathName(path, lazyLoad, verbose);
+				res = this.pr_loadSampleAtPathName(path, lazyLoad, verbose, samplePath);
 				if(res.notNil) {
 					if(verbose) {
 						"%[%: %]".format(res.name, path.folderName, path.fileName).postln;
@@ -345,17 +345,13 @@ Smpl {
 		^(limit-tmplim);
 	}
 
-	*pr_loadSampleAtPathName {|path, lazyLoad, verbose|
+	*pr_loadSampleAtPathName {|path, lazyLoad, verbose, sampleSourcePath|
 		var sf; // samplefile
-		var id, group, groupId, preStr = ".";
-		var isGlobal = false;
-
 		sf = SampleFile.openRead(path);
 
 		if(sf.notNil) {
-			// TEST IF GLOBAL OR LOCAL.. path matches
-			// globalSamplesPath
-			isGlobal = (path.pathOnly.find(globalSamplesPath) == 0);
+			var id, group, groupId, preStr = ".", tmp1;
+			var sampleSource = \UNKNOWN;
 
 			id = path.fileNameWithoutExtension.replace(" ","");
 			if(samples.at(id).notNil) {
@@ -366,9 +362,30 @@ Smpl {
 
 			sf.name = id;
 			samples.put(id, sf);
-			if(isGlobal) { globalSamples.put(id, sf) } { localSamples.put(id, sf) };
 
-			groupId = path.folderName.asSymbol;
+			if(sampleSourcePath.pathOnly.find(globalSamplesPath) == 0) {
+				sampleSource = \GLOBAL;
+				groupId = "_glo";
+				globalSamples.put(id, sf);
+			} {
+				sampleSource = \LOCAL;
+				groupId = "_loc";
+				localSamples.put(id, sf);
+			};
+
+			// Create group id from file path
+			tmp1 = path.allFolders.reverse;
+			sampleSourcePath.allFolders.do {|sourceFolderName|
+				if(sourceFolderName != tmp1.pop) {
+						"DIRECTORY PATH MISMATCH '%' when SAMPLE DIRECTORY IS '%'".format(path, sampleSourcePath).throw;
+				};
+			};
+
+			tmp1.reverse.do {|folderName|
+				groupId = groupId++"--"++folderName;
+			};
+
+			groupId = groupId.asSymbol;
 			group = samplesByGroup.at(groupId);
 			if(group.isNil) { // new group
 				group = Dictionary.new;
