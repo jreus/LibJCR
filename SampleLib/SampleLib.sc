@@ -87,6 +87,7 @@ Smpl {
 	classvar <localSamplesPath; // local samples directory
 
 	classvar <activeServer; // server where buffers are allocated and loaded, should be set on load
+	classvar <listenerGroup; // a group at the head of the server where recording synths go
 
 	// gui variables
 	classvar <win, <playLooped=false, <autoPlay=true;
@@ -97,11 +98,20 @@ Smpl {
 	// and thus you must be wary of performing operations on buffer variables still holding nil.
 	classvar <>lazyLoadGlobal=true, <>lazyLoadLocal=false;
 
+	// cache of pre-allocated buffers used for live sampling
+	classvar <liveSampleBuffers;
+	classvar <liveSamplesByName;
+	classvar <numLiveBuffers=10;
+	classvar <nextLiveBufferAllocIndex=0;
+	classvar <liveBufferDurationSeconds=4;
+
 	*initClass {
 		samples = Dictionary.new;
 		samplesByGroup = Dictionary.new;
 		globalSamples = Dictionary.new;
 		localSamples = Dictionary.new;
+		liveSampleBuffers = List.new;
+		liveSamplesByName = Dictionary.new;
 		allGroups = List.new;
 		allTags = List.new;
 		globalSamplesPath = "~/_samples".absolutePath;
@@ -115,6 +125,8 @@ Smpl {
 		Event.addEventType(\bufPlay, {|s|
 			var chans = ~buf.numChannels;
 			if(~end.isNil) { ~end = ~buf.numFrames };
+			/* If I want to use the functionality of \note events then I can't depend on freq being set here..
+			   See the note model in the Event guides...
 			if(~dur.isNil.or { ~dur < 0 }) {
 				var bufratescale = s.sampleRate / ~buf.sampleRate;
 				var prate = ~rate * (~freq / ~rootPitch);
@@ -127,6 +139,7 @@ Smpl {
 				};
 				~dur = ~dur - ~rel;
 			};
+			*/
 			if(chans == 1) {
 				~instrument = \smpl_pitchedSample1ch;
 			} {
@@ -134,7 +147,7 @@ Smpl {
 			};
 			~type = \note;
 			currentEnvironment.play;
-		}, (freq: \c5.f, rootPitch: \c5.f, rate: 1.0, atk: 0.01, rel: 0.01, start: 0, outbus: 0, loops: 1, dur: -1));
+		}, (rootPitch: \c5.f, scale: Scale.major, root: 0, octave: 5, rate: 1.0, atk: 0.01, rel: 0.01, start: 0, outbus: 0, loops: 1, dur: -1));
 
 		// Playback event for Smpl library
 		Event.addEventType(\smpl, {|s|
@@ -188,6 +201,29 @@ Smpl {
 
 	}
 
+	*pr_allocateLiveSampleBuffers {|serv|
+
+		if(listenerGroup.isNil) {
+			listenerGroup = Group.new(serv, \addBefore);
+		};
+
+		numLiveBuffers.do {|idx|
+			var group, newid, groupid = \livesample;
+			newid = "ls%".format(idx);
+			group = samplesByGroup.at(groupid);
+			if(group.isNil) {
+				group = Dictionary.new;
+				samplesByGroup.put(groupid, group);
+			};
+
+			Buffer.alloc(serv, serv.sampleRate * liveBufferDurationSeconds, 1, {|bf|
+				var ls;
+				bf.sampleRate = serv.sampleRate;
+				liveSampleBuffers.add(bf);
+			});
+		};
+	}
+
 	// private method
 	*pr_checkServerAlive {|errorFunc|
 		activeServer = activeServer ? Server.default;
@@ -237,7 +273,18 @@ Smpl {
 		activeServer = server;
 		this.pr_checkServerAlive({^nil});
 		this.pr_loadEventTypes();
+
+		"LOAD SYNTHDEFS".warn;
 		this.pr_loadSynthDefs(server);
+
+		"LOAD LIVESAMPLES".warn;
+		this.pr_allocateLiveSampleBuffers(server);
+
+		"LOAD SAMPLEFILE SYNTHDEFS".warn;
+		SampleFile.loadSynthDefs(server);
+
+		"LOAD LIVESAMPLE SYNTHDEFS".warn;
+		LiveSample.loadSynthDefs(server);
 
 		if(File.exists(globalSamplesPath).not) { File.mkdir(globalSamplesPath) };
 
@@ -395,6 +442,81 @@ Smpl {
 		};
 	}
 
+
+	// Can be called before catch to prepare a LiveSample by name for recording...
+	// you can choose a specific livesample buffer (0-9) by index, or pass -1 to automatically
+	// choose the next one...
+	*prepareLiveSample {|name, index=(-1)|
+		var ls;
+		if(name.notNil) {
+			ls = liveSamplesByName.at(name);
+			if(ls.isNil) {
+				var lsbuf, group;
+
+				// get a specific livesample slot by index, or choose the next one
+				// based on allocation order
+				if(index === -1) {
+					// choose next based on allocation order
+					index = nextLiveBufferAllocIndex;
+					nextLiveBufferAllocIndex = ((nextLiveBufferAllocIndex + 1) % numLiveBuffers).asInteger;
+
+				};
+
+				// choose by specific index
+				lsbuf = liveSampleBuffers[index];
+				ls = LiveSample.new(name, lsbuf, activeServer, listenerGroup);
+				ls.library = \livesample.asString;
+				liveSamplesByName.put(name, ls);
+				samples.put(name, ls);
+				group = samplesByGroup.at(\livesample);
+				group.put(name, ls);
+
+			};
+		};
+		^ls;
+	}
+
+	// make a new sample on the fly, based on onset detection and thresh-holding
+	// records a "LiveSample" to the given Smpl Lib name
+	// if a LiveSample with that name doesn't already exist, one will be taken
+	// from the pre-allocated livesample indexes in order of allocation
+	// you can also optionally specify an index to use a specific livesample slot
+	*catch {|name, in=0, ampthresh=0.01, silenceThresh=1, timeout=10, index=(-1)|
+		var ls = this.prepareLiveSample(name, index);
+		if(ls.notNil) {
+			// listen on the given input bus for audio
+			ls.catch(in, ampthresh, silenceThresh, timeout);
+		};
+		^ls;
+	}
+
+	// Start endless loop recording into a livesample buffer
+	*catchStart {|name, in=0, timeout=30, index=(-1)|
+		var ls = this.prepareLiveSample(name, index);
+		if(ls.notNil) {
+			// listen on the given input bus for audio
+			ls.catchStart(in, timeout);
+		};
+		^ls;
+	}
+
+	// Stop endless loop recording into a livesample buffer
+	*catchStop {|name|
+		var ls;
+		if(name.notNil) {
+			var group;
+
+			// Get livesample
+			ls = liveSamplesByName.at(name);
+			if(ls.notNil) {
+				ls.catchStop();
+			} {
+				"No Smpl named '%' was found".format(name).error;
+			};
+		};
+		^ls;
+	}
+
 	*gui {|alwaysOnTop=false|
 		var styler, subStyler, decorator, childView, childDecorator, subView;
 		var searchText, sampleList, autoPlayCB, txt;
@@ -504,7 +626,9 @@ Smpl {
 			sf = samples.at(id);
 			"Selected % %".format(id, sf.path).postln;
 			// load sample into memory, prep for playback, & create subwindow when done
+
 			sf.loadFileIntoBuffer(activeServer, {|buf|
+
 				if(currentSample.notNil) {currentSample.cleanup};
 				currentSample = sf;
 
@@ -513,14 +637,21 @@ Smpl {
 					// Build the Sample Info window
 					subView.removeAll; // remove all views from the sub window
 					subView.decorator = FlowLayout(subView.bounds);
+
 					insertButton = subStyler.getSizableButton(subView, sf.name, size: (width-20-60-40-60-10)@lineheight); // name
 
 					subStyler.getSizableText(subView, "%ch".format(sf.numChannels), 20); // channels
+
+
 					subStyler.getSizableText(subView, sf.sampleRate, 40); // sample rate
+
 					subStyler.getSizableText(subView, sf.headerFormat, 40); // format
+
+
 					subStyler.getSizableText(subView, sf.duration.round(0.01).asString ++ "s", 60); // length
 
 					subStyler.getHorizontalSpacer(subView, width);
+
 
 					// Tags
 					tagfield = TextField(subView, (width-40)@lineheight).string_("tags");
@@ -530,10 +661,12 @@ Smpl {
 						"open '%'".format(sf.path.dirname).unixCmd;
 					});
 
+
 					// event & array buttons
 					insertEventBtn = subStyler.getSizableButton(subView, "event", size: 50@lineheight);
 					insertArrayBtn = subStyler.getSizableButton(subView, "array", size: 50@lineheight);
 					insertPathBtn = subStyler.getSizableButton(subView, "path", size: 50@lineheight);
+
 
 					/*
 					NEW TIMELINE VIEW (integrated into SampleFile)
@@ -660,11 +793,17 @@ stop { if(playNode.notNil) { playNode.free; playNode = nil } }
 
 
 SampleFileView : CompositeView {
+	classvar <dummyData;
+
 	var <sf;
 	var <oscfunc; // osc listener for cursor update messages
 	var <sfview; // SoundFileView at the core of this view
 	// other views
 	var <playButton, <loopCheckbox;
+
+	*initClass {
+		dummyData = Array.fill(44100, {0.0});
+	}
 
 	*new {|samplefile, parent, bounds, guistyler|
 		^super.new(parent, bounds).init(samplefile, guistyler);
@@ -672,12 +811,16 @@ SampleFileView : CompositeView {
 
 	// TODO: Use guistyler, if nil create a new one..
 	init {|samplefile, guistyler|
-		var loopText;
+		var playbuttonaction, mouseupaction, loopText;
+
 		if(samplefile.isNil) { "Invalid SampleFile provided to SampleFileView: %".format(samplefile).throw };
+
 		sf = samplefile;
+
 		playButton = Button(this, Rect(0, this.bounds.height - 20, 100, 20)).states_([["Play"],["Stop"]]);
 
 		loopCheckbox = CheckBox(this, Rect(120, this.bounds.height-20, 30, 30), "loop");
+
 		loopText = StaticText(this, Rect(160, this.bounds.height-20, 100, 30)).string_("loop").action_({|txt| loopCheckbox.valueAction_(loopCheckbox.value.not) });
 
 		loopCheckbox.action_({|cb|
@@ -685,17 +828,15 @@ SampleFileView : CompositeView {
 			"looping %".format(cb.value).postln;
 		});
 
-		sfview = SoundFileView.new(this, Rect(0,0, this.bounds.width, this.bounds.height - 20)).soundfile_(sf);
-		sfview.read(0, sf.numFrames);
-		sfview.timeCursorOn_(true).timeCursorColor_(Color.white).timeCursorPosition_(0);
-		sfview.mouseUpAction_({|sfv|
+		sfview = SoundFileView.new(this, Rect(0,0, this.bounds.width, this.bounds.height - 20));
+
+		mouseupaction = {|sfv|
 			var newpos, clickPos, regionLength;
 			#clickPos, regionLength = sfv.selections[sfv.currentSelection];
 			"Clicked % %".format(clickPos, regionLength).postln;
-		});
+		};
 
-		// Start/Stop button Action
-		playButton.action_({|btn|
+		playbuttonaction = {|btn|
 			if(btn.value==1) {// play
 				var st, end, len, res;
 				#st, len = sfview.selections[sfview.currentSelection];
@@ -740,7 +881,38 @@ SampleFileView : CompositeView {
 			} {//stop
 				sf.stop;
 			};
-		});
+		};
+
+
+		if(sf.class === LiveSample) {
+			"LOADING LIVESAMPLE INTO VIEW".warn;
+			// Load the buffer data into an array
+			sf.buffer.loadToFloatArray(action: {|data|
+				{
+					// TODO: This doesn't seem to work... :-/
+					// probably need to break it down more fundamentally...
+					// SoundFileView
+					sfview.setData(data);//, samplerate: sf.sampleRate);
+
+					sfview.timeCursorOn_(true)
+					.timeCursorColor_(Color.white)
+					.timeCursorPosition_(0);
+
+					sfview.mouseUpAction_(mouseupaction);
+					playButton.action_(playbuttonaction);
+
+				}.fork(AppClock);
+			});
+		} {
+			// Regular SampleFile can just read from disk
+			"LOADING SAMPLEFILE INTO VIEW".warn;
+			sfview.soundfile_(sf);
+			sfview.read(0, sf.numFrames);
+			sfview.timeCursorOn_(true).timeCursorColor_(Color.white).timeCursorPosition_(0);
+			sfview.mouseUpAction_(mouseupaction);
+			playButton.action_(playbuttonaction);
+		};
+
 
 		^this;
 	}
@@ -774,6 +946,218 @@ SampleFileView : CompositeView {
 
 }
 
+// Representation of a live sample that can be used within Smpl Lib
+LiveSample : SampleFile {
+	classvar <recordDefName = \liveSampleRecord;
+	classvar <recordLoopDefName = \liveSampleRecordLoop;
+	classvar <liveSampleStatusListenerOSCdef = nil;
+	classvar <liveSamplesById;
+	classvar <>nextId = 1000;
+
+	var <>listenerSynth;
+	var <>listenerGroup;
+	var <>server;
+	var <id;
+	var <duration;
+
+	*initClass {
+		liveSamplesById = Dictionary.new;
+	}
+
+	*new {|sname, buf, serv, group|
+		^super.new.init(sname, buf, serv, group);
+	}
+
+	init {|sname, buf, serv, group|
+		// TODO: in the future maybe want to enable option to write captured samples out to disk
+		//path = "PATH/TO/WRITE/TO";
+		//headerFormat = "WAV";
+		id = LiveSample.nextId;
+		LiveSample.nextId = LiveSample.nextId + 1000;
+		server = serv;
+		listenerGroup = group;
+		name = sname;
+		buffer = buf;
+		numFrames = buf.numFrames;
+		sampleRate = buf.sampleRate;
+		numChannels = buf.numChannels;
+		duration = numFrames / sampleRate;
+		LiveSample.liveSamplesById.put(id, this);
+		super.initMemberData(); // initialize SampleFile data fields
+	}
+
+	catch {|in=0, ampthresh=0.1, silenceThresh=1, timeout=10|
+		if(listenerSynth.notNil) {
+			listenerSynth.free;
+			listenerSynth = nil;
+		};
+
+		// Launch a livesample synth to listen on inbus in
+		listenerSynth = Synth(recordDefName, [
+			\buf, buffer,
+			\listenerId, id,
+			\inbus, in,
+			\ampThresh, ampthresh,
+			\silenceTimeout, silenceThresh,
+			\releaseAfter, timeout
+		], target: listenerGroup, addAction: \addToHead);
+
+		// liveSampleStatusListenerOSCdef
+		// now controls responding to the status messages
+		// if recording stops or the end of buffer is reached
+		//     then free & nil the listenerSynth
+
+	}
+
+	catchStart {|in=0, timeout=30|
+		if(listenerSynth.notNil) {
+			listenerSynth.free;
+			listenerSynth = nil;
+		};
+
+		// Launch a livesample synth to record indefinitely
+		listenerSynth = Synth(recordLoopDefName, [
+			\buf, buffer,
+			\listenerId, id,
+			\inbus, in,
+			\releaseAfter, timeout
+		], target: listenerGroup, addAction: \addToHead);
+
+		// liveSampleStatusListenerOSCdef
+		// now controls responding to the status messages
+		// if recording stops or the end of buffer is reached
+		//     then free & nil the listenerSynth
+
+	}
+
+	catchStop {
+		if(listenerSynth.notNil) {
+			listenerSynth.free;
+			listenerSynth = nil;
+		};
+	}
+
+
+
+	// override
+	loadFileIntoBuffer {|server, action=nil|
+		if(action.notNil) {
+			action.value(buffer);
+		};
+		^this;
+	}
+
+
+	*loadSynthDefs {
+
+		if(SynthDescLib.global.synthDescs.at(recordDefName).isNil) {
+			// listenerId must be evenly divisible by 1000
+			SynthDef(recordDefName, {|buf, listenerId=1000, inbus=0,
+				ampThresh=0.01, silenceTimeout=2, releaseAfter=20|
+
+				var insig, amp, timeElapsed, t_timeExpired;
+				var t_trans, firstTrans, recActive, timeSinceTrans, t_recordingStop, t_reachedEnd;
+				insig = SoundIn.ar(inbus);
+				amp = Amplitude.kr(insig, 0.01, 0.01);
+				t_trans = Changed.kr(amp > ampThresh);
+				firstTrans = Latch.kr(1, t_trans);
+				timeSinceTrans = Sweep.kr(t_trans, 1.0);
+				recActive = (amp > ampThresh) + ((timeSinceTrans < silenceTimeout) * firstTrans);
+				t_recordingStop = (1-recActive) * firstTrans;
+
+				t_reachedEnd = Done.kr(
+					RecordBuf.ar(insig, buf, 0, 1.0, run: recActive, loop: 0)
+				);
+				timeElapsed = Sweep.kr(1, 1.0);
+				t_timeExpired = timeElapsed > releaseAfter;
+
+				SendTrig.kr(DC.kr(1), listenerId + 1, 1);
+				SendTrig.kr(t_timeExpired, listenerId + 2, 1);
+				SendTrig.kr(recActive, listenerId + 3, 1);
+				SendTrig.kr(t_recordingStop, listenerId + 4, 1);
+				SendTrig.kr(t_reachedEnd, listenerId + 5, 1);
+
+				FreeSelf.kr(t_timeExpired + t_reachedEnd + t_recordingStop);
+			}).add;
+		};
+
+
+
+		if(SynthDescLib.global.synthDescs.at(recordLoopDefName).isNil) {
+
+			SynthDef(recordLoopDefName, {|buf, inbus=0, listenerId=1000, releaseAfter=30|
+				var insig, amp, timeElapsed, t_timeExpired;
+				var t_end;
+				var firstTrans, recActive, timeSinceTrans, t_recordingStop, t_reachedEnd;
+
+				insig = SoundIn.ar(inbus);
+				timeElapsed = Sweep.kr(1, 1.0);
+				t_end = timeElapsed > releaseAfter;
+				RecordBuf.ar(insig, buf, 0, 1.0, 0.0, 1, 1);
+
+				SendTrig.kr(DC.kr(1), listenerId + 11, 1);
+				SendTrig.kr(t_end, listenerId + 22, 1);
+
+				FreeSelf.kr(t_end);
+			}).add;
+
+		};
+
+
+
+		if(liveSampleStatusListenerOSCdef.isNil) {
+			liveSampleStatusListenerOSCdef = OSCdef(\liveSampleStatusListener, {|msg|
+				var ls, listenerId, statusId;
+				listenerId = msg[2].asInteger;
+				statusId = listenerId % 1000;
+				listenerId = (listenerId / 1000).asInteger * 1000;
+				ls = liveSamplesById.at(listenerId);
+				//"% listener: %   status: %".format(ls, listenerId, statusId).postln;
+				if(ls.notNil) {
+					switch( statusId,
+						1, {
+							"Waiting for audio % %".format(listenerId, ls.name).postln;
+						},
+						2, {
+							"Time Expired liveSample % %".format(listenerId, ls.name).warn;
+							ls.listenerSynth = nil;
+
+						},
+						3, {
+							"Recording Started % %".format(listenerId, ls.name).postln;
+
+						},
+						4, {
+							"Recording Stopped % %".format(listenerId, ls.name).postln;
+							ls.listenerSynth = nil;
+						},
+						5, {
+							"Reached End of Buffer % %".format(listenerId, ls.name).warn;
+							ls.listenerSynth = nil;
+						},
+						11, {
+							"Started Looped Recording % %".format(listenerId, ls.name).warn;
+						},
+						22, {
+							"Stopped Looped Recording % %".format(listenerId, ls.name).warn;
+							ls.listenerSynth = nil;
+						},
+					);
+				};
+			}, "/tr");
+		};
+	}
+
+	asString {
+		^"LiveSample % %".format(id, name);
+	}
+
+}
+
+
+
+
+
 // Extension of SoundFile with playback and metadata additions for working within Smpl library
 SampleFile : SoundFile {
 
@@ -805,7 +1189,7 @@ SampleFile : SoundFile {
 
 
 	// GUI plumbing
-	classvar <nextTriggerId=0;
+	classvar <nextTriggerId=111;
 	var <triggerId;
 
 	// GUI views
@@ -825,16 +1209,22 @@ SampleFile : SoundFile {
 
 	// path is of type PathName
 	init {|path, rootpitch|
-		var rx;
-		triggerId = nextTriggerId;
-		nextTriggerId = nextTriggerId + 2;
 
+		this.initMemberData();
+		// Filepath initialization
 		this.openRead(path.asAbsolutePath); // get metadata
 		this.close; // close file resource
-		tags = Set.new;
 		folderGroups = this.pr_getFolderGroups(path);
 		// TODO: Should load tags and other info from external metadata file here
 		name = path.fileNameWithoutExtension.replace(" ","");
+
+	}
+
+	initMemberData {|rootpitch|
+		var rx;
+		triggerId = nextTriggerId;
+		nextTriggerId = nextTriggerId + 111;
+		tags = Set.new;
 
 		if(rootpitch.isNil) {
 			// Get root pitch from filename
@@ -850,6 +1240,7 @@ SampleFile : SoundFile {
 		};
 		rootPitch = rootpitch;
 	}
+
 
 	// path is of type PathName
 	pr_getFolderGroups {|path|

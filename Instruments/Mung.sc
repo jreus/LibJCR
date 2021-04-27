@@ -10,7 +10,7 @@ Granular Synthesis Instruments
 @TODO: Look into approaches for interleaving selectable segments of sound files.
 
 @usage
-// stereo munger
+// stereo munger, buffers must be stereo or this will fail silently!
 m = Mung(2, [buffer1, buffer2...]);
 m.gui;
 m.play;

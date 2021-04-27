@@ -45,7 +45,7 @@ Project {
 	classvar <>outclean=10, <>outverb=12, <>outbass=14; // hardware shared busses
 	classvar <mixersynth;
 
-	// TODO: create a project preferences file
+	// TODO: create a project preferences file to include this stuff...
 	*initClass {
 		samplerates = [22050, 44100, 48000, 88200, 96000];
 		blocksizes = [16,32,64,128,256,512,1024];
