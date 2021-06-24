@@ -50,11 +50,11 @@ Beat {
 		if(muteval.class === Integer) {
 			muteval = (muteval > 0).not;
 		};
-		playersByName.at(name).setMuted(muteval);
+		playersByName.at(name).mute(muteval);
 	}
 
 	muteAll {
-		playersByName.do(_.setMuted(true));
+		playersByName.do(_.mute(true));
 	}
 
 	// Adds a live-sample based sequencer
@@ -89,19 +89,19 @@ Beat {
 
 	// Adds a basic sample file sequencer
 	// Sequence Sample
-	sequ {|name, sampleName, pattern, stepd, sdur, outbus, start, end, rate, pan, autoplay=true|
+	samSeq {|name, sampleName, pattern, zeroDegree, sdurscale, outbus, start, end, rate, pan, autoplay=true, stepd=nil|
 		if(Smpl.at(sampleName).notNil) {
 			var seq;
 			seq = playersByName.at(name);
 			if(seq.isNil) {
-				seq = SampleSequence.new(server, tracksGroup, name, sampleName, pattern, stepd, sdur, outbus, start, end, rate, pan, autoplay);
+				seq = SampleSequence.new(server, tracksGroup, name, sampleName, pattern, zeroDegree, sdurscale, outbus, start, end, rate, pan, autoplay, stepd);
 				playersByName.put(name, seq);
 				if(isPlaying && autoplay) {
 					"Start Platback with clock %".format(clock).warn;
 					seq.play(clock);
 				};
 			} {
-				seq.update(sampleName, pattern, stepd, sdur, outbus, start, end, rate, pan);
+				seq.update(sampleName, pattern, zeroDegree, sdurscale, outbus, start, end, rate, pan, stepd);
 			};
 
 		}
@@ -157,7 +157,6 @@ EventSequence {
 	var <muted=false;
 	var <patternString;
 	var <pitchPatternString;
-	var <stepDelta=1.0;
 	var <durationScale=1.0;
 	var <eventPanning=0.0;
 	var <zeroDegree=0;
@@ -165,6 +164,7 @@ EventSequence {
 	var <pitchScale;
 	var <outBus;
 	var <autoPlay;
+	var <fixedStepDelta;
 
 	*initClass {
 		ampMap = ($0: 0, $1: 0.1, $2: 0.15, $3: 0.2, $4: 0.25, $5: 0.3, $6: 0.35, $7: 0.4, $8: 0.45, $9: 0.5, $a: 0.55, $b: 0.6, $c: 0.7, $d: 0.8, $e: 0.9, $f: 1.0, Rest(): Rest());
@@ -184,55 +184,63 @@ EventSequence {
 		trackFX = Synth(\trackInsert_2ch, [\bus, trackBus, \amp, trackAmp, \dest, outbus], synthgroup, \addToTail);
 	}
 
-	setAmp {|ampVal|
+
+
+
+	//************ PUBLIC API ***************//
+
+	stepd {|stepdval|
+		fixedStepDelta = stepdval;
+		^this;
+	}
+
+
+	amp {|ampVal|
 		trackAmp = ampVal;
 		if(muted.not) {
 			trackFX.set(\amp, trackAmp);
 		};
+		^this;
 	}
 
-	setMuted {|muteVal=true|
+	mute {|muteVal=true|
 		muted = muteVal;
 		if(muted) {
 			trackFX.set(\amp, 0);
 		} {
 			trackFX.set(\amp, trackAmp);
 		};
+		^this;
 	}
 
-	mute {|muteVal=true|
-		this.setMuted(muteVal);
-	}
-
-	setOutBus {|outbus|
+	out {|outbus|
 		"New outbus %".format(outbus).warn;
 		if(outbus.notNil) {
 			"Outbus Set".warn;
 			outBus = outbus;
 			trackFX.set(\dest, outBus);
 		}
+		^this;
 	}
 
-	setDurationScale {|dur|
+	pan {|pan|
+		if(pan.notNil) {
+			eventPanning = pan;
+		}
+		^this;
+	}
+
+
+	// duration scale : a percentage (float)
+	dur {|dur|
 		if(dur.notNil) {
 			durationScale = dur;
 		}
 	}
 
-	setStepDelta {|stepd|
-		if(stepd.notNil) {
-			stepDelta = stepd;
-		}
-	}
 
-	setPan {|pan|
-		if(pan.notNil) {
-			eventPanning = pan;
-		}
-	}
-
-	// Musical Scale
-	setPitchScale {|ascale|
+	// musical scale : a scale (Scale)
+	scale {|ascale|
 		if(ascale.notNil) {
 			if(ascale.isKindOf(Scale)) {
 				pitchScale = ascale;
@@ -242,7 +250,8 @@ EventSequence {
 		}
 	}
 
-	setZeroPitch {|newzeropitch|
+	// pitch of 0 degree in scale-based notation : a note symbol \c5 or a scale degree
+	zeroPitch {|newzeropitch|
 		if(newzeropitch.notNil) {
 			if(newzeropitch.isKindOf(Symbol)) {
 				// note symbol
@@ -260,19 +269,32 @@ EventSequence {
 				};
 			};
 		};
+		^this;
 	}
 
 
 	play {|clock|
 		pbindef.play(quant: [clock.beatsPerBar, 0, 0, 0], argClock: clock, protoEvent: ());
+		^this;
 	}
 
 	stop {
 		pbindef.stop();
+		^this;
 	}
 
 }
 
+
+
+/*
+ ____                        _      ____
+/ ___|  __ _ _ __ ___  _ __ | | ___/ ___|  ___  __ _
+\___ \ / _` | '_ ` _ \| '_ \| |/ _ \___ \ / _ \/ _` |
+ ___) | (_| | | | | | | |_) | |  __/___) |  __/ (_| |
+|____/ \__,_|_| |_| |_| .__/|_|\___|____/ \___|\__, |
+                      |_|                         |_|
+*/
 SampleSequence : EventSequence {
 
 	var <sampleName;
@@ -282,16 +304,17 @@ SampleSequence : EventSequence {
 	var <samplePanning=0.0;
 
 
-	*new {|serv, synthgroup, seqid, smplname, pattern=nil, stepd, sampledur, outbus, start, end, rate, pan, autoplay|
-		^super.new(serv, synthgroup, seqid, outbus, autoplay).init(smplname, pattern, stepd, sampledur, outbus, start, end, rate, pan);
+
+	*new {|serv, synthgroup, seqid, smplname, pattern=nil, zeropitch, sampledurscale, outbus, start, end, rate, pan, autoplay, stepd|
+		^super.new(serv, synthgroup, seqid, outbus, autoplay).init(smplname, pattern, zeropitch, sampledurscale, outbus, start, end, rate, pan, stepd);
 	}
 
-	init {|smplname, pattern, stepd, sampledur, outbus, start, end, rate, pan|
-		this.update(smplname, pattern, stepd, sampledur, outbus, start, end, rate, pan);
+	init {|smplname, pattern, zeropitch, sampledurscale, outbus, start, end, rate, pan, stepd|
+		this.update(smplname, pattern, zeropitch, sampledurscale, outbus, start, end, rate, pan, stepd);
 	}
 
 	// Update the currently running sequence
-	update {|smplname, pattern, stepd, sdur, outbus, start, end, rate, pan|
+	update {|smplname, pattern, zeropitch, sdurscale, outbus, start, end, rate, pan, stepd|
 		var isNewSample, smpl;
 		isNewSample = (smplname != sampleName);
 
@@ -310,11 +333,14 @@ SampleSequence : EventSequence {
 			};
 		};
 
-		this.setStepDelta(stepd);
-		this.setDuration(sdur);
-		this.setOutBus(outbus);
-		this.setRate(rate);
-		this.setPan(pan);
+		// rootpitch defaults to \c5 > this is degree: 0 root: 0 octave: 5 in the
+		// default note event
+		this.zeroPitch(zeropitch);
+		this.stepd(stepd);
+		this.dur(sdurscale);
+		this.out(outbus);
+		this.rate(rate);
+		this.pan(pan);
 
 		if(start.notNil) {
 			sampleStartFrame = start;
@@ -325,47 +351,125 @@ SampleSequence : EventSequence {
 		this.setPattern(pattern);
 	}
 
-	setRate {|rate|
-		if(rate.notNil) {
-			samplePlayRate = rate;
-		}
-	}
 
-	// Parse text sample pattern into pbindef
-	setPattern {|pattern|
-		var parsed, pb, smpl;
 
-		parsed = List.new;
 
-		pattern.replace(" ", "").do{|ch|
-
-			if(ch === $-) {
-				parsed.add(nil);
-			} {
-				if(ampMap.includesKey(ch)) {
-					parsed.add(ch);
-				} {
-					"Invalid symbol '%' in pattern '%'".format(ch, pattern).throw;
-				}
-			}
-		};
+	// SAMPLE PLAYER: Parse text pattern into pbindef
+	setPattern {|pattern, type=\AMPLITUDE|
+		var parsedRaw, parsedByMeasure, pb, smpl;
+		var measureIdx=0, measureStepDelta;
 
 		smpl = Smpl.at(sampleName);
-		pb = List.new;
-		pb.add(\type); pb.add(\smpl);
-		pb.add(\smpl); pb.add(parsed.collect({|st| if(st.isNil) { Rest(stepDelta) } { sampleName } }).pseq(inf));
-		pb.add(\dur); pb.add( durationScale );
-		pb.add(\delta); pb.add( stepDelta );
-		pb.add(\amp); pb.add( parsed.collect({|st| if(st.isNil) { 0.0 } { ampMap[st] } }).pseq(inf) );
-		pb.add(\pan); pb.add( samplePanning );
-		pb.add(\freq); pb.add( smpl.rootPitch.f );
-		pb.add(\rootPitch); pb.add( smpl.rootPitch.f );
-		pb.add(\start); pb.add( sampleStartFrame );
-		pb.add(\end); pb.add( sampleEndFrame );
-		pb.add(\rate); pb.add( samplePlayRate );
-		pb.add(\out); pb.add( trackBus );
+		parsedByMeasure = List.new;
+		pattern.stripWhiteSpace().do{|ch|
+			var ms;
+			ms = parsedByMeasure.at(measureIdx);
+			if(ms.isNil) {
+				ms = Dictionary.new;
+				ms[\stepDelta] = 1;
+				ms[\pattern] = "";
+				ms[\rawPattern] = "";
+				ms[\parsedDegree] = List.new;
+				ms[\parsedSmpl] = List.new;
+				ms[\parsedDur] = List.new;
+				ms[\parsedAmp] = List.new;
+				ms[\parsedDelta] = List.new;
+				parsedByMeasure.add(ms);
+			};
 
-		pbindef = Pbindef(id, *pb.asArray);
+			switch(ch,
+				$ , { // new measure
+					measureIdx = measureIdx + 1;
+				},
+				$-, { // rest
+					ms[\parsedAmp].add(nil);
+					ms[\rawPattern] = ms[\rawPattern] ++ $-;
+				},
+				{ // event
+					if(type == \AMPLITUDE) {
+						if(ampMap.includesKey(ch)) {
+							ms[\parsedAmp].add(ch);
+							ms[\rawPattern] = ms[\rawPattern] ++ ch;
+						} {
+							"Invalid amp value '%' in pattern '%'".format(ch, pattern).throw;
+						}
+					};
+				}
+			);
+		};
+
+		// Go through all measures and update stepDeltas
+		parsedByMeasure.do {|ms|
+			// 1. calculate stepDelta
+			if(fixedStepDelta.isNil) {
+				ms[\stepDelta] = 1 / ms[\parsedAmp].size;
+			} {
+				ms[\stepDelta] = fixedStepDelta;
+			};
+
+			// 2. update degree, duration & amp values
+			ms[\parsedAmp] = ms[\parsedAmp].collect {|val|
+				var res;
+				// Side effects first
+				ms[\parsedDur].add(ms[\stepDelta] * durationScale);
+				ms[\parsedDelta].add(ms[\stepDelta]);
+				ms[\parsedDegree].add(0);
+				ms[\parsedSmpl].add(sampleName);
+
+				if(val.isNil) {
+					res = Rest(ms[\stepDelta]);
+				} {
+					res = ampMap[val];
+				};
+
+				res;
+			};
+
+		};
+
+
+		pb = List.new;
+
+
+		// Build pbind
+		pb = Dictionary.new;
+		pb.put( \type, \smpl);
+		pb.put( \scale, pitchScale );
+		pb.put( \root, zeroDegree );
+		pb.put( \octave, zeroOctave );
+		pb.put( \pan, eventPanning);
+		pb.put( \out, trackBus );
+
+		// Create smpl, dur, degree, delta, amp sequences
+		pb.put(\smpl, List.new);
+		pb.put(\dur, List.new);
+		pb.put(\degree, List.new);
+		pb.put(\delta, List.new);
+		pb.put(\amp, List.new);
+
+		parsedByMeasure.do {|ms|
+			pb[\smpl].add( Pseq(ms[\parsedSmpl]) );
+			pb[\dur].add( Pseq(ms[\parsedDur]) );
+			pb[\degree].add( Pseq(ms[\parsedDegree]) );
+			pb[\delta].add( Pseq(ms[\parsedDelta]) );
+			pb[\amp].add( Pseq(ms[\parsedAmp]) );
+		};
+
+		pb[\dur] = Pseq(pb[\dur], inf);
+		pb[\degree] = Pseq(pb[\degree], inf);
+		pb[\delta] = Pseq(pb[\delta], inf);
+		pb[\amp] = Pseq(pb[\amp], inf);
+
+
+		// Sample Specific Keys
+		pb[\smpl] = Pseq(pb[\smpl], inf);
+		pb.put(\start, sampleStartFrame );
+		pb.put(\end, sampleEndFrame );
+		pb.put(\rootPitch, smpl.rootPitch.f );
+		pb.put(\rate, samplePlayRate );
+
+
+		pbindef = Pbindef(id, *(pb.getPairs));
 		patternString = pattern;
 		"Successfully built pattern '%'".format(pattern).postln;
 	}
@@ -396,10 +500,31 @@ SampleSequence : EventSequence {
 	}
 
 
+
+
+	//***** PUBLIC API *****//
+
+	// sample playback rate : a float
+	rate {|rate|
+		if(rate.notNil) {
+			samplePlayRate = rate;
+		}
+		^this;
+	}
+
+
+
 }
 
 
-
+/*
+ ____              _   _       ____
+/ ___| _   _ _ __ | |_| |__   / ___|  ___  __ _
+\___ \| | | | '_ \| __| '_ \  \___ \ / _ \/ _` |
+ ___) | |_| | | | | |_| | | |  ___) |  __/ (_| |
+|____/ \__, |_| |_|\__|_| |_| |____/ \___|\__, |
+       |___/                                 |_|
+*/
 SynthSequence : EventSequence {
 
 	var <instrumentName;
@@ -420,17 +545,17 @@ SynthSequence : EventSequence {
 		isNewInstrument = (instname != instrumentName);
 
 		if(isNewInstrument) {
-			this.setInstrumentName(instname);
+			this.instrument(instname);
 		};
 
 		// rootpitch defaults to \c5 > this is degree: 0 root: 0 octave: 5 in the
 		// default note event
-		this.setZeroPitch(zeropitch);
-		this.setDurationScale(durscale);
-		this.setOutBus(outbus);
-		this.setPitchScale(notescale);
+		this.zeroPitch(zeropitch);
+		this.dur(durscale);
+		this.out(outbus);
+		this.scale(notescale);
+		this.pan(pan);
 
-		this.setPan(pan);
 
 		this.setPattern(pattern);
 	}
@@ -553,17 +678,6 @@ SynthSequence : EventSequence {
 		"Successfully built pattern '%'".format(pattern).postln;
 	}
 
-	setInstrumentName {|instname|
-		if(SynthDescLib.global.synthDescs.at(instname).notNil) {
-			instrumentName = instname;
-		} {
-			"Could not find synth definition '%'".format(instrumentName).throw;
-		};
-	}
-
-
-
-
 	setPitch {|pattern, scale, root|
 		var lastPitch, parsed = List.new;
 
@@ -587,6 +701,22 @@ SynthSequence : EventSequence {
 		pbindef.set(\degree, parsed.pseq(inf), \scale, scale, \root, root.f);
 		pitchPatternString = pattern;
 	}
+
+	//***** PUBLIC API *****//
+
+	// set instrument name : a synth symbol in SynthDescLib.global (Symbol)
+	instrument {|instname|
+		if(SynthDescLib.global.synthDescs.at(instname).notNil) {
+			instrumentName = instname;
+		} {
+			"Could not find synth definition '%'".format(instrumentName).throw;
+		};
+		^this;
+	}
+
+
+
+
 
 }
 
@@ -621,7 +751,7 @@ SmplHelper {
 			} {
 				sm = sampleList[sidx];
 			};
-			beat.sequ(name, sm[1], pattern, stepdur, sampledur, out, sm[3], sm[4], rate, pan);
+			beat.samSeq(name, sm[1], pattern, stepdur, sampledur, out, sm[3], sm[4], rate, pan);
 	}
 
 	// one shot sample player, uses start and stop frames

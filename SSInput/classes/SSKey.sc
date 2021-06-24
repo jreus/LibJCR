@@ -248,8 +248,8 @@ SSKey {
 
 	// http://macbiblioblog.blogspot.nl/2014/12/key-codes-for-function-and-special-keys.html
 	*initKeycodes {
-		keysByCode ?? {
-			keysByCode = (
+		var kbcMac, kbcLinux;
+		kbcMac = (
 				10:'sectionsign',
 				18:'1',
 				19:'2',
@@ -333,6 +333,93 @@ SSKey {
 				62:'rightcontrol'
 
 			);
+
+		kbcLinux = (
+			9:'escape',
+
+
+			    49:'tilde',
+			    10:'1',
+				11:'2',
+				12:'3',
+				13:'4',
+				14:'5',
+				15:'6',
+				16:'7',
+				17:'8',
+				18:'9',
+				19:'0',
+				20:'minus',
+				21:'equal',
+				22:'backspace',
+
+			    23:'tab',
+				24:'q',
+				25:'w',
+				26:'e',
+				27:'r',
+				28:'t',
+				29:'y',
+				30:'u',
+				31:'i',
+				32:'o',
+				33:'p',
+				34:'leftbracket',
+				35:'rightbracket',
+                51:'bkslsh',
+
+			    38:'a',
+				39:'s',
+				40:'d',
+				41:'f',
+				42:'g',
+				43:'h',
+				44:'j',
+				45:'k',
+				46:'l',
+			    47:'semicolon',
+				48:'apost',
+                36:'return',
+
+			    50:'shift',
+			    52:'z',
+				53:'x',
+				54:'c',
+				55:'v',
+				56:'b',
+				57:'n',
+				58:'m',
+			    59:'comma',
+				60:'period',
+				61:'fwdslsh',
+			    62:'rightshift',
+
+				37:'control',
+				64:'alt',
+			    65:'space',
+				113:'left',
+				111:'up',
+				116:'down',
+				114:'right',
+				108:'rightalt',
+				105:'rightcontrol'
+
+
+
+			);
+
+		keysByCode ?? {
+			Platform.case(
+				\linux, {
+				keysByCode = kbcLinux;
+				},
+				\osx, {
+				keysByCode = kbcMac;
+				}, {
+				Error("Unknown OS setup for SSKey keycodes").throw;
+				},
+			);
+
 		};
 		^keysByCode;
 	}

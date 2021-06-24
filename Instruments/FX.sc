@@ -7,44 +7,15 @@ FX Units Livecoda
 @usage
 
 FX Unit Microlanguage
-
-
-ws: waveshaping distortion
-  t=type (1:tanh, 2:softclip)
-  p=pre amplification (float)
-  v=pre amplification variation (float)
-  vt=preamp modulation type (1:LFNoise2 2:SinOsc)
-  vr=preamp modulation rate (float)
-  mx=wet/dry mix (0-1)
-
-lpf: filter
-  co=cutoff hz (float)
-  cv=cutoff variation hz (float)
-  rq=reciprocal of q (float)
-  vt=cutoff modulator type (1: LFNoise2, 2: SinOsc)
-  vr=cutoff modulator rate hz (float)
-
-hpf: filter
-  co=cutoff hz (float)
-  cv=cutoff variation hz (float)
-  rq=reciprocal of q (float)
-  vt=cutoff modulator type (1: LFNoise2, 2: SinOsc)
-  vr=cutoff modulator rate hz (float)
-
-del: delay
-  no params yet
-
-rev: reverb JPverb
-  vt=reverb time in seconds, does not effect early reflections
-  da=hf damping as verb decays (0-1.0) - 0 is no damping
-  vs=reverb size, scales size of delay lines (0.5 - 5) - values below 1 sound metallic
-  er=early reflection shape (0-1.0) 0.707 = smooth exp decay / lower value = slower buildup
-  lo=reverb time multiplier in low frequencies (0-1.0)
-  mi=reverb time multiplier in mid frequencies (0-1.0)
-  hi=reverb time multiplier in hi frequencies (0-1.0)
-  mx=wet/dry mix (0-1)
+See FX.help()
 
 Examples:
+
+FX.setUnit("fx1", "ws rev")
+b.syn("s1", \karp, "0 1 2 3", out: FX.bus("fx1"))
+
+
+Microland Examples:
 
 ws rev
 ws(t1 p20 v2 mx0.8) rev(vt10.5 vs2 er0.7 lo0.2 mi0.5 hi0.4 mx0.5) ws(t2 p5 v1 mx0.5)  lpf(co1200 cv200 rq0.7)
@@ -308,6 +279,49 @@ FX {
 		};
 
 
+	}
+
+
+	// Microlang help string
+	*help {
+"
+ws: waveshaping distortion
+  t=type (1:tanh, 2:softclip)
+  p=pre amplification (float)
+  v=pre amplification variation (float)
+  vt=preamp modulation type (1:LFNoise2 2:SinOsc)
+  vr=preamp modulation rate (float)
+  mx=wet/dry mix (0-1)
+
+lpf: filter
+  co=cutoff hz (float)
+  cv=cutoff variation hz (float)
+  rq=reciprocal of q (float)
+  vt=cutoff modulator type (1: LFNoise2, 2: SinOsc)
+  vr=cutoff modulator rate hz (float)
+
+hpf: filter
+  co=cutoff hz (float)
+  cv=cutoff variation hz (float)
+  rq=reciprocal of q (float)
+  vt=cutoff modulator type (1: LFNoise2, 2: SinOsc)
+  vr=cutoff modulator rate hz (float)
+
+del: delay
+  no params yet
+
+rev: reverb JPverb
+  vt=reverb time in seconds, does not effect early reflections
+  da=hf damping as verb decays (0-1.0) - 0 is no damping
+  vs=reverb size, scales size of delay lines (0.5 - 5) - values below 1 sound metallic
+  er=early reflection shape (0-1.0) 0.707 = smooth exp decay / lower value = slower buildup
+  lo=reverb time multiplier in low frequencies (0-1.0)
+  mi=reverb time multiplier in mid frequencies (0-1.0)
+  hi=reverb time multiplier in hi frequencies (0-1.0)
+  mx=wet/dry mix (0-1)
+
+gn: gain
+".postln;
 	}
 
 

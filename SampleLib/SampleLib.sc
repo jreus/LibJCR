@@ -145,6 +145,7 @@ Smpl {
 			} {
 				~instrument = \smpl_pitchedSample2ch;
 			};
+
 			~type = \note;
 			currentEnvironment.play;
 		}, (rootPitch: \c5.f, scale: Scale.major, root: 0, octave: 5, rate: 1.0, atk: 0.01, rel: 0.01, start: 0, outbus: 0, loops: 1, dur: -1));
@@ -159,7 +160,7 @@ Smpl {
 
 	// Load Synth Defs used by Smpl Lib for playback and auditioning.
 	*pr_loadSynthDefs {|serv|
-		SynthDef('smpl_pitchedSample1ch', {|amp=0.5, rate=1, freq=261.62556, rootPitch=261.62556, start=0, end, buf, out, pan=0, atk=0.001, rel=0.001, co=20000, rq=1.0, gate=1, loops=1|
+		SynthDef('smpl_pitchedSample1ch', {|amp=0.5, rate=1, freq=261.62556, rootPitch=261.62556, start=0, end, buf, out, pan=0, atk=0.001, rel=0.001, co=20000, rq=1.0, gate=1, loops=1, autogate=0|
 			var sig, playhead, dur, prate;
 			var t_cnt = 0, t_loop = 0, mute=1;
 			prate = rate * (freq / rootPitch);
@@ -170,16 +171,22 @@ Smpl {
 			t_loop = mute * t_loop;
 			playhead = EnvGen.ar(Env([0, start, end],[0, dur]), t_loop);
 			sig = BufRd.ar(1, buf, playhead);
+
+			// release gate on mute if autogate is 1
+			gate = Select.kr(autogate, [gate, mute]);
+
 			// Free on gate release
 			sig = sig * EnvGen.ar(Env.asr(atk, 1.0, rel), gate: gate, doneAction: 2);
+
 			// free on silence...
 			//DetectSilence.ar(sig, 0.0001, 0.5, doneAction: Done.freeSelf);
+
 			sig = Mix.ar(sig);
 			sig = BLowPass4.ar(sig, co, rq);
 			Out.ar(out, Pan2.ar(sig,pan) * amp);
 		}).add;
 
-		SynthDef('smpl_pitchedSample2ch', {|amp=0.5, rate=1, freq=261.62556, rootPitch=261.62556, start=0, end, buf, out, gate=1, atk=0.01, pan=0.0, rel=0.01, co=20000, rq=1.0, loops=1|
+		SynthDef('smpl_pitchedSample2ch', {|amp=0.5, rate=1, freq=261.62556, rootPitch=261.62556, start=0, end, buf, out, gate=1, atk=0.01, pan=0.0, rel=0.01, co=20000, rq=1.0, loops=1, autogate=0|
 			var sig, playhead, dur, prate;
 			var t_cnt = 0, t_loop = 0, mute=1;
 			prate = rate * freq / rootPitch;
@@ -190,6 +197,10 @@ Smpl {
 			t_loop = mute * t_loop;
 			playhead = EnvGen.ar(Env([0, start, end],[0, dur]), t_loop);
 			sig = BufRd.ar(2, buf, playhead);
+
+			// release gate on mute if autogate is 1
+			gate = Select.kr(autogate, [gate, mute]);
+
 			// Free on gate release
 			sig = sig * EnvGen.ar(Env.asr(atk, 1.0, rel), gate: gate, doneAction: 2);
 			// Alternatively, free on silence...
@@ -750,19 +761,22 @@ Smpl {
 	The sample is played as a simple synth instance. This method returns a reference to
 	the synth instance.
 	*/
-	*splay {|id, start=0, end=(-1), rate=1.0, amp=1.0, out=0, co=20000, rq=1, pan=0, loops=1|
-		var dur, ch, syn, smp = Smpl.samples.at(id);
+	*splay {|id, start=0, end=(-1), rate=1.0, amp=1.0, out=0, co=20000, rq=1, pan=0, loops=1, autogate=1|
+		var dur, ch, syn, srate, smp = Smpl.samples.at(id);
 		ch = smp.numChannels;
 		if(end == -1) { end = smp.numFrames };
 		if(ch==1) {
 			syn = Synth(\smpl_pitchedSample1ch, [\amp, amp, \start, start, \end, end, \rootPitch, "A4".f,
-				\freq, "A4".f * rate, \atk, 0.001, \rel, 0.1, \co, co, \rq, rq, \out, out, \pan, pan, \buf, smp.buffer, \loops, loops]);
+				\freq, "A4".f * rate, \atk, 0.001, \rel, 0.1, \co, co, \rq, rq, \out, out, \pan, pan, \buf, smp.buffer, \loops, loops, \autogate, autogate]);
 		} {
 			syn = Synth(\smpl_pitchedSample2ch, [\amp, amp, \start, start, \end, end, \rootPitch, "A4".f,
-				\freq, "A4".f * rate, \atk, 0.001, \rel, 0.1, \co, co, \rq, rq, \out, out, \pan, pan, \buf, smp.buffer, \loops, loops]);
+				\freq, "A4".f * rate, \atk, 0.001, \rel, 0.1, \co, co, \rq, rq, \out, out, \pan, pan, \buf, smp.buffer, \loops, loops, \autogate, autogate]);
 		};
-		dur = ((end-start) / smp.buffer.sampleRate / rate) * loops;
-		{ dur.wait; syn.set(\gate, 0) }.fork;
+		srate = smp.buffer.sampleRate;
+		if(srate.isNil) { srate = smp.sampleRate };
+		if(srate.isNil) { srate = activeServer.sampleRate };
+		dur = ((end-start) / srate / rate) * loops;
+
 		^syn;
 	}
 
