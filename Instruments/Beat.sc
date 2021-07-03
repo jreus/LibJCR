@@ -9,29 +9,45 @@ Beatmaker
 
 */
 
-Beat {
+Beat : SymbolProxyManager {
 	var <clock;
 	var <server;
 	var <tracksGroup; // should come before the fx/master group but after recordings
 	var <playersByName;
 	var <isPlaying;
 
+	classvar <singleton;
+	classvar <>verbose = true;
+
 	*new {|beatclock, serv, synthgroup|
-		^super.new.init(beatclock, serv, synthgroup);
+		if(singleton.isNil) {
+			^super.new.init(beatclock, serv, synthgroup);
+		} {
+			^singleton;
+		}
+	}
+
+	*getManager {
+		^singleton;
+	}
+
+	getManager {
+		^this;
 	}
 
 	init {|beatclock, serv, synthgroup|
 		clock = beatclock;
 		server = serv;
 		tracksGroup = synthgroup;
-		this.loadSynthDefsEventTypes();
+		this.prLoadSynthDefsEventTypes();
 		isPlaying = false;
 		playersByName = Dictionary.new();
+		singleton = this;
 	}
 
 
 	// Load any necessary SynthDefs and Event Types used by Beat
-	loadSynthDefsEventTypes {
+	prLoadSynthDefsEventTypes {
 		var insertSynthName = \trackInsert_2ch;
 		if(SynthDescLib.global.synthDescs.at(insertSynthName).isNil) {
 			SynthDef(insertSynthName, {|bus, amp=1.0, dest=0|
@@ -42,24 +58,94 @@ Beat {
 
 	gui {}
 
+
+	// Sequencer accessor by symbol name
 	at {|name|
 		^playersByName.at(name);
 	}
 
-	mute {|name, muteval=0|
+	// Mute sequence with given name to mute value (true/1 = muted)
+	// name can also be a collection of names, in which case, the
+	// muteval is applied to all sequences in the collection
+	mute {|names, muteval=true|
+		var seq;
 		if(muteval.class === Integer) {
-			muteval = (muteval > 0).not;
+			muteval = (muteval > 0);
 		};
-		playersByName.at(name).mute(muteval);
+
+		if(names.class.isKindOf(Collection)) {
+			names.do {|name|
+				seq = playersByName.at(name);
+				if(seq.notNil) { seq.mute(muteval) };
+			};
+		} {
+			seq = playersByName.at(names);
+			if(seq.notNil) { seq.mute(muteval) };
+		};
 	}
 
-	muteAll {
-		playersByName.do(_.mute(true));
+	muteAll {|muteval=true|
+		playersByName.do(_.mute(muteval));
 	}
 
-	// Adds a live-sample based sequencer
-	liveSequ {|name, pattern, stepd, sdur, outbus, start, end, rate, pan, autoplay=true, act=\none, in=0, timeout=30|
+	// Sort of like the inverse of mute
+	//  unmutes the named sequence(s) and mutes all other sequences
+	solo {|names|
+		this.muteAll;
+		this.mute(names, false);
+	}
+
+
+
+	// Destroy a sequencer if it exists
+	// Destroy all sequences if name is nil
+	xx {|name=nil|
+		if(name.notNil) {
+			var seq = playersByName.at(name);
+			if(seq.notNil) {
+				this.unregister(name);
+				// Destroy seq
+				seq.xx;
+			} {
+				"Beat.clear: Sequence '%' does not exist".format(name).error;
+			}
+		} {
+			// name is nil, delete all
+			"Clear all sequences".warn;
+			playersByName.keys.do {|name|
+				var seq = playersByName.at(name);
+				this.unregister(name);
+				seq.xx;
+			};
+		}
+	}
+
+	// Unregister an EventSequence from being managed by this Beat player
+	unregister {|eventSeq|
+		if(playersByName.at(eventSeq.id).isNil) {
+			"Beat.unregister: Attempted to unregister '%' but this sequence name is not registered".format(eventSeq.id).error;
+		} {
+			playersByName.removeAt(eventSeq.id);
+			SymbolProxyManager.unregisterSymbolProxy(eventSeq.id);
+		}
+
+	}
+
+	// Register an EventSequence to be managed by this Beat player
+	register {|eventSeq|
+		if(playersByName.at(eventSeq.id).isNil) {
+			playersByName.put(eventSeq.id, eventSeq);
+			SymbolProxyManager.registerSymbolProxy(eventSeq.id, Beat);
+		} {
+			"Beat.register: Attempted to unregister '%' but this sequence name is already registered ... ignoring".format(eventSeq.id).error;
+		}
+	}
+
+
+	//********** Create / reference a LIVE SEQUENCER ************//
+	live {|name, pattern, zeroDegree, sdurscale, outbus, rate, pan, autoplay=true, stepd=nil, act=\none, in=0, timeout=30|
 		var seq, smpl, sid;
+		name = name.asSymbol;
 		sid = "ls_" ++ name;
 		"Smpl Name '%'".format(sid).postln;
 		// 1. get live sample, or create one if it doesn't already exist...
@@ -69,7 +155,7 @@ Beat {
 		};
 
 		// 2. create or update the sequence
-		this.sequ(name, sid, pattern, stepd, sdur, outbus, start, end, rate, pan, autoplay);
+		this.smpl(name, sid, pattern, zeroDegree, sdurscale, outbus, rate: rate, pan: pan, autoplay: autoplay, stepd: stepd);
 
 		// 3. catch or looprecord
 		switch(act,
@@ -87,44 +173,59 @@ Beat {
 		);
 	}
 
-	// Adds a basic sample file sequencer
-	// Sequence Sample
-	samSeq {|name, sampleName, pattern, zeroDegree, sdurscale, outbus, start, end, rate, pan, autoplay=true, stepd=nil|
+	//********** Create / reference a SAMPLE SEQUENCER ************//
+	smpl {|name, sampleName, pattern, zeroDegree, sdurscale, outbus, start, end, rate, pan, autoplay=true, stepd=nil|
+		var seq;
 		if(Smpl.at(sampleName).notNil) {
-			var seq;
 			seq = playersByName.at(name);
 			if(seq.isNil) {
-				seq = SampleSequence.new(server, tracksGroup, name, sampleName, pattern, zeroDegree, sdurscale, outbus, start, end, rate, pan, autoplay, stepd);
-				playersByName.put(name, seq);
+				if(name.class != Symbol) {
+					"Bad sequence name '%'! Sequence name must be a Symbol".format(name).throw;
+				};
+
+				seq = SampleSequence.new(server, this, tracksGroup, name, sampleName, pattern, zeroDegree, sdurscale, outbus, start, end, rate, pan, autoplay, stepd);
+
+				this.register(seq);
+
 				if(isPlaying && autoplay) {
 					"Start Platback with clock %".format(clock).warn;
 					seq.play(clock);
 				};
 			} {
-				seq.update(sampleName, pattern, zeroDegree, sdurscale, outbus, start, end, rate, pan, stepd);
+				seq.pr_update(sampleName, pattern, zeroDegree, sdurscale, outbus, start, end, rate, pan, stepd);
 			};
 
 		}
+
+		^seq;
 	}
 
-	// Adds a basic synth sequencer
-	// Sequence Synth
-	synSeq {|name, instrumentName, pattern, rootPitch, durScale, outbus, pan, scale, autoplay=true|
+	//********** Create / reference a SYNTH SEQUENCER ************//
+	syn {|name, instrumentName, pattern, rootPitch, durScale, outbus, pan, scale, autoplay=true|
 		var seq;
 		instrumentName = instrumentName.asSymbol;
-
 		seq = playersByName.at(name);
 		if(seq.isNil) {
-			seq = SynthSequence.new(server, tracksGroup, name, instrumentName, pattern, rootPitch, durScale, outbus, pan, scale, autoplay);
-			playersByName.put(name, seq);
+				if(name.class != Symbol) {
+					"Bad sequence name '%'! Sequence name must be a Symbol".format(name).throw;
+				};
+
+			seq = SynthSequence.new(server, this, tracksGroup, name, instrumentName, pattern, rootPitch, durScale, outbus, pan, scale, autoplay);
+
+			this.register(seq);
+
 			if(isPlaying && autoplay) {
 				"Start playback of Synth Sequence with clock %".format(clock).warn;
 				seq.play(clock);
 			};
 		} {
-			seq.update(instrumentName, pattern, rootPitch, durScale, outbus, pan, scale);
+			seq.pr_update(instrumentName, pattern, rootPitch, durScale, outbus, pan, scale);
 		};
+
+		^seq;
 	}
+
+
 
 	play {
 		playersByName.keysValuesDo({|id, player|
@@ -144,17 +245,30 @@ Beat {
 }
 
 
+
+
+
+
+/***
+Superclass EventSequence
+***/
 EventSequence {
 	classvar <ampMap;
 	classvar <scaleDegreeMap;
 
 	var <id;
-	var <pdefId;
-	var <pbindef;
-	var <trackBus;
-	var <trackFX;
+	var <parentBeat; // parent Beat object
+
+	// Track Insert
+	var <trackBus; // sequence always sends output to this bus
+	var <trackFX;  // insert synth receiving sequencer signals..
 	var <trackAmp=1.0;
 	var <muted=false;
+	var <outBus;
+
+	// Pattern / Pdef
+	var <pdefId;
+	var <pbindef;
 	var <patternString;
 	var <pitchPatternString;
 	var <durationScale=1.0;
@@ -162,7 +276,6 @@ EventSequence {
 	var <zeroDegree=0;
 	var <zeroOctave=5;
 	var <pitchScale;
-	var <outBus;
 	var <autoPlay;
 	var <fixedStepDelta;
 
@@ -172,12 +285,13 @@ EventSequence {
 		//this.pr_loadEventTypes;
 	}
 
-	*new {|serv, synthgroup, seqid, outbus, autoplay|
-		^super.new.initEventSequence(serv, synthgroup, seqid, outbus, autoplay);
+	*new {|serv, parent, synthgroup, seqid, outbus, autoplay|
+		^super.new.prInitEventSequence(serv, parent, synthgroup, seqid, outbus, autoplay);
 	}
 
-	initEventSequence {|serv, synthgroup, seqid, outbus, autoplay|
+	prInitEventSequence {|serv, parent, synthgroup, seqid, outbus, autoplay|
 		id = seqid;
+		parentBeat = parent;
 		pdefId = id ++ "_player" ++ rand(100);
 		autoPlay = autoplay;
 		trackBus = Bus.audio(serv, 2);
@@ -189,12 +303,28 @@ EventSequence {
 
 	//************ PUBLIC API ***************//
 
-	stepd {|stepdval|
-		fixedStepDelta = stepdval;
-		^this;
+	// stop any playback and free up resources for this sequencer...
+	xx {
+		this.stop;
+		if(pbindef.notNil) {
+			pbindef.clear;
+		};
+		trackFX.free;
+		trackBus.free;
+
+		if(parentBeat.notNil) {
+			parentBeat.unregister(this);
+		}
 	}
 
 
+
+
+
+	//****************************************
+	// Track Insert Controls... these only modify the track insert synth
+	//   they don't touch the pdef
+	//****************************************
 	amp {|ampVal|
 		trackAmp = ampVal;
 		if(muted.not) {
@@ -213,15 +343,37 @@ EventSequence {
 		^this;
 	}
 
+	// Set output bus for this sequencer's track insert...
 	out {|outbus|
-		"New outbus %".format(outbus).warn;
 		if(outbus.notNil) {
-			"Outbus Set".warn;
+
+			if(outbus.isKindOf(Number).not.and { outbus.isKindOf(Bus).not }) {
+				{
+					outbus = outbus.bus;
+				}.try({
+					"Invalid output bus '%'".format(outbus).throw;
+				});
+			};
+
+			if(Beat.verbose) {
+				"Set % track destination to '%'".format(id, outBus).warn;
+			};
+
 			outBus = outbus;
 			trackFX.set(\dest, outBus);
 		}
 		^this;
 	}
+
+
+
+
+
+	//*********************************
+	// Pattern / Pbind Controls...
+	//   NOTE: Many of these do not rebuild the pattern
+	//         which you will have to do manually
+	//*********************************
 
 	pan {|pan|
 		if(pan.notNil) {
@@ -239,18 +391,34 @@ EventSequence {
 	}
 
 
+	stepd {|stepdval|
+		fixedStepDelta = stepdval;
+		^this;
+	}
+
+
+	// MELODY PARAMETERS
+	// see the event pitch model: https://depts.washington.edu/dxscdoc/Help/Tutorials/Streams-Patterns-Events5.html
+
+
 	// musical scale : a scale (Scale)
 	scale {|ascale|
 		if(ascale.notNil) {
 			if(ascale.isKindOf(Scale)) {
 				pitchScale = ascale;
+				if(pbindef.notNil) {
+					Pbindef(pdefId, \scale, pitchScale);
+				};
 			} {
 				"'%' is not a Scale".format(ascale).throw;
 			};
-		}
+		};
+		^this;
 	}
 
-	// pitch of 0 degree in scale-based notation : a note symbol \c5 or a scale degree
+	// pitch of 0 degree in scale-based notation :
+	//             a note symbol \c5 or a scale degree
+	// combines root and octave in the event pitch model
 	zeroPitch {|newzeropitch|
 		if(newzeropitch.notNil) {
 			if(newzeropitch.isKindOf(Symbol)) {
@@ -268,11 +436,50 @@ EventSequence {
 					"Invalid zero pitch '%' must be a note symbol or integer degree".format(newzeropitch).throw;
 				};
 			};
+
+			if(pbindef.notNil) {
+				Pbindef(pdefId, \root, zeroDegree, \octave, zeroOctave);
+			};
 		};
 		^this;
 	}
 
+	// convenience alias for zeroPitch
+	zero {|newzeropitch|
+		^this.zeroPitch(newzeropitch);
+	}
 
+
+	// chromatic transposition
+	ctrans {|semitones=0|
+		if(pbindef.notNil) {
+			Pbindef(pdefId, \ctranspose, semitones);
+		} {
+			"Cannot set ctrans on % - build Pdef first!".format(this.id).throw;
+		};
+	}
+
+	// modal transposition
+	mtrans {|degrees=0|
+		if(pbindef.notNil) {
+			Pbindef(pdefId, \mtranspose, degrees);
+		} {
+			"Cannot set mtrans on % - build Pdef first!".format(this.id).throw;
+		};
+	}
+
+	// gamut transposition (???)
+	gtrans {|gpitch=0|
+		if(pbindef.notNil) {
+			Pbindef(pdefId, \gtranspose, gpitch);
+		} {
+			"Cannot set gtrans on % - build Pdef first!".format(this.id).throw;
+		};
+	}
+
+
+
+	// Start and stop the Pdef
 	play {|clock|
 		pbindef.play(quant: [clock.beatsPerBar, 0, 0, 0], argClock: clock, protoEvent: ());
 		^this;
@@ -305,16 +512,16 @@ SampleSequence : EventSequence {
 
 
 
-	*new {|serv, synthgroup, seqid, smplname, pattern=nil, zeropitch, sampledurscale, outbus, start, end, rate, pan, autoplay, stepd|
-		^super.new(serv, synthgroup, seqid, outbus, autoplay).init(smplname, pattern, zeropitch, sampledurscale, outbus, start, end, rate, pan, stepd);
+	*new {|serv, parent, synthgroup, seqid, smplname, pattern=nil, zeropitch, sampledurscale, outbus, start, end, rate, pan, autoplay, stepd|
+		^super.new(serv, parent, synthgroup, seqid, outbus, autoplay).init(smplname, pattern, zeropitch, sampledurscale, outbus, start, end, rate, pan, stepd);
 	}
 
 	init {|smplname, pattern, zeropitch, sampledurscale, outbus, start, end, rate, pan, stepd|
-		this.update(smplname, pattern, zeropitch, sampledurscale, outbus, start, end, rate, pan, stepd);
+		this.pr_update(smplname, pattern, zeropitch, sampledurscale, outbus, start, end, rate, pan, stepd);
 	}
 
 	// Update the currently running sequence
-	update {|smplname, pattern, zeropitch, sdurscale, outbus, start, end, rate, pan, stepd|
+	pr_update {|smplname, pattern, zeropitch, sdurscale, outbus, start, end, rate, pan, stepd|
 		var isNewSample, smpl;
 		isNewSample = (smplname != sampleName);
 
@@ -334,11 +541,14 @@ SampleSequence : EventSequence {
 		};
 
 		// rootpitch defaults to \c5 > this is degree: 0 root: 0 octave: 5 in the
+
+		// update track insert output
+		this.out(outbus);
+
 		// default note event
 		this.zeroPitch(zeropitch);
 		this.stepd(stepd);
 		this.dur(sdurscale);
-		this.out(outbus);
 		this.rate(rate);
 		this.pan(pan);
 
@@ -348,14 +558,13 @@ SampleSequence : EventSequence {
 		if(end.notNil) {
 			sampleEndFrame = end;
 		};
-		this.setPattern(pattern);
+
+		this.pr_setPattern(pattern);
 	}
 
 
-
-
 	// SAMPLE PLAYER: Parse text pattern into pbindef
-	setPattern {|pattern, type=\AMPLITUDE|
+	pr_setPattern {|pattern, type=\PAT_AMPLITUDE|
 		var parsedRaw, parsedByMeasure, pb, smpl;
 		var measureIdx=0, measureStepDelta;
 
@@ -386,7 +595,7 @@ SampleSequence : EventSequence {
 					ms[\rawPattern] = ms[\rawPattern] ++ $-;
 				},
 				{ // event
-					if(type == \AMPLITUDE) {
+					if(type == \PAT_AMPLITUDE) {
 						if(ampMap.includesKey(ch)) {
 							ms[\parsedAmp].add(ch);
 							ms[\rawPattern] = ms[\rawPattern] ++ ch;
@@ -438,7 +647,7 @@ SampleSequence : EventSequence {
 		pb.put( \root, zeroDegree );
 		pb.put( \octave, zeroOctave );
 		pb.put( \pan, eventPanning);
-		pb.put( \out, trackBus );
+		pb.put( \out, trackBus ); // output is always to the track insert bus
 
 		// Create smpl, dur, degree, delta, amp sequences
 		pb.put(\smpl, List.new);
@@ -469,7 +678,7 @@ SampleSequence : EventSequence {
 		pb.put(\rate, samplePlayRate );
 
 
-		pbindef = Pbindef(id, *(pb.getPairs));
+		pbindef = Pbindef(pdefId, *(pb.getPairs));
 		patternString = pattern;
 		"Successfully built pattern '%'".format(pattern).postln;
 	}
@@ -495,6 +704,7 @@ SampleSequence : EventSequence {
 			}
 		};
 
+		// does this even work?
 		pbindef.set(\degree, parsed.pseq(inf), \scale, scale, \root, root.f);
 		pitchPatternString = pattern;
 	}
@@ -504,13 +714,23 @@ SampleSequence : EventSequence {
 
 	//***** PUBLIC API *****//
 
+
+
+
 	// sample playback rate : a float
+	// Note: this does not rebuild the pattern
 	rate {|rate|
 		if(rate.notNil) {
 			samplePlayRate = rate;
 		}
 		^this;
 	}
+
+	// Convernience method to set an amplitude pattern
+	pat {|pattern|
+		this.pr_setPattern(pattern, \PAT_AMPLITUDE);
+	}
+
 
 
 
@@ -531,16 +751,16 @@ SynthSequence : EventSequence {
 	var <pitchFactor;
 
 
-	*new {|serv, synthgroup, seqid, instname, pattern=nil, zeropitch, durscale, outbus, pan, notescale, autoplay|
-		^super.new(serv, synthgroup, seqid, outbus, autoplay).init(instname, pattern, zeropitch, durscale, outbus, pan, notescale);
+	*new {|serv, parent, synthgroup, seqid, instname, pattern=nil, zeropitch, durscale, outbus, pan, notescale, autoplay|
+		^super.new(serv, parent, synthgroup, seqid, outbus, autoplay).init(instname, pattern, zeropitch, durscale, outbus, pan, notescale);
 	}
 
 	init {|instname, pattern, zeropitch, durscale, outbus, pan, notescale|
-		this.update(instname, pattern, zeropitch, durscale, outbus, pan, notescale);
+		this.pr_update(instname, pattern, zeropitch, durscale, outbus, pan, notescale);
 	}
 
-	// Update the currently running SYNTH sequence
-	update {|instname, pattern, zeropitch, durscale, outbus, pan, notescale|
+	// Update the currently running Synth Sequencer
+	pr_update {|instname, pattern, zeropitch, durscale, outbus, pan, notescale|
 		var isNewInstrument;
 		isNewInstrument = (instname != instrumentName);
 
@@ -549,20 +769,23 @@ SynthSequence : EventSequence {
 		};
 
 		// rootpitch defaults to \c5 > this is degree: 0 root: 0 octave: 5 in the
-		// default note event
-		this.zeroPitch(zeropitch);
-		this.dur(durscale);
+		// update track insert destination
 		this.out(outbus);
+
+		// melody params
+		this.zeroPitch(zeropitch);
 		this.scale(notescale);
+
+		this.dur(durscale);
 		this.pan(pan);
 
 
-		this.setPattern(pattern);
+		this.pr_setPattern(pattern);
 	}
 
 
 	// INSTRUMENT: Parse text pattern into pbindef
-	setPattern {|pattern, type=\SCALEDEGREE|
+	pr_setPattern {|pattern, type=\PAT_SCALEDEGREE|
 		var parsedRaw, parsedByMeasure, pb, smpl;
 		var measureIdx=0, measureStepDelta;
 
@@ -592,7 +815,7 @@ SynthSequence : EventSequence {
 					ms[\rawPattern] = ms[\rawPattern] ++ $-;
 				},
 				{ // event
-					if(type == \SCALEDEGREE) {
+					if(type == \PAT_SCALEDEGREE) {
 						if(scaleDegreeMap.includesKey(ch)) {
 							ms[\parsedDegree].add(ch);
 							ms[\rawPattern] = ms[\rawPattern] ++ ch;
@@ -608,8 +831,6 @@ SynthSequence : EventSequence {
 		parsedByMeasure.do {|ms|
 			// 1. calculate stepDelta
 			ms[\stepDelta] = 1 / ms[\parsedDegree].size;
-
-			"Parsed degree %".format(ms[\parsedDegree]).warn;
 
 			// 2. update degree, duration & amp values
 			ms[\parsedDegree] = ms[\parsedDegree].collect {|val|
@@ -633,7 +854,6 @@ SynthSequence : EventSequence {
 			//    does it allow dynamic shuffling of patterns?
 			// see guide on Composing Patterns
 			// using EventPatternProxy ~rhythm ~melody example..
-			"Build Pbind ... %".format(ms).warn;
 			ms[\pbind] = Pbind(
 				\degree, Pseq(ms[\parsedDegree], 1),
 				\amp, Pseq(ms[\parsedAmp], 1),
@@ -653,8 +873,6 @@ SynthSequence : EventSequence {
 		pb.put(\amp, List.new);
 
 		parsedByMeasure.do {|ms|
-			"Build Pseqs ... %".format(ms).warn;
-
 			pb[\dur].add( Pseq(ms[\parsedDur]) );
 			pb[\degree].add( Pseq(ms[\parsedDegree]) );
 			pb[\delta].add( Pseq(ms[\parsedDelta]) );
@@ -670,14 +888,26 @@ SynthSequence : EventSequence {
 		pb.put( \root, zeroDegree );
 		pb.put( \octave, zeroOctave );
 
-		pb.put(\pan, eventPanning);
-		pb.put(\out, trackBus );
+		pb.put( \pan, eventPanning );
 
-		pbindef = Pbindef(id, *(pb.getPairs));
+		pb.put( \out, trackBus ); // should always be the track insert bus
+
+		if(Beat.verbose) {
+			"Parsed Pattern Keys ...".warn;
+			pb.keysValuesDo {|key, val|
+				"%: %".format(key, val).postln;
+			}
+		};
+
+		pbindef = Pbindef(pdefId, *(pb.getPairs));
 		patternString = pattern;
-		"Successfully built pattern '%'".format(pattern).postln;
+
+		"Built pattern: %".format(pattern).warn;
 	}
 
+
+	// TODO: would be really useful to have a command like this!
+	//    just to update the scale/root/pattern
 	setPitch {|pattern, scale, root|
 		var lastPitch, parsed = List.new;
 
@@ -714,6 +944,10 @@ SynthSequence : EventSequence {
 		^this;
 	}
 
+	// Set a scale degree pattern
+	pat {|pattern|
+		this.pr_setPattern(pattern, \PAT_SCALEDEGREE);
+	}
 
 
 
@@ -805,3 +1039,8 @@ SmplHelper {
 
 
 }
+
+
+
+
+

@@ -148,6 +148,70 @@ JLog {
 }
 
 
+// System for using symbols as language proxies for more complex objects.
+// Certain classes, called SymbolProxyManagers, can also keep internal dictionaries
+// of symbol>object and link them into the SymbolProxy system. This is useful, for example,
+// when building livecoding microlanguages that use symbols as placeholders for objects.
+// See Classes: Beat, FX
+SymbolProxyManager {
+	classvar <registeredSymbols; // maybe not possible?
+
+	*initClass {
+		registeredSymbols = Dictionary.new;
+	}
+
+	// Register a symbol as a proxy for an object manager or for a specific object
+	//   In the case of a manager, it must respond to the interface for SymbolProxyManager
+	*registerSymbolProxy {|symbol, target|
+		if(symbol.class != Symbol) { "'%' must be of type Symbol".format(symbol).throw };
+		if(target.isNil) { "Target cannot be nil".throw };
+		registeredSymbols.put(symbol, target);
+		^target;
+	}
+
+	*unregisterSymbolProxy {|symbol|
+		^registeredSymbols.removeAt(symbol);
+	}
+
+
+	*performProxyMethod { |symbol, selector, args|
+		var targetObject = registeredSymbols.at(symbol);
+
+		if(targetObject.notNil) {
+
+			if( ( targetObject.isKindOf(Class).and {targetObject.superclasses.includes(SymbolProxyManager)} || ( targetObject.isKindOf(SymbolProxyManager) )).and { targetObject.getManager.notNil } ) {
+				targetObject = targetObject.getManager.at(symbol); // fetch from the manager
+			};
+
+
+			if(targetObject.class.findRespondingMethodFor(selector).isNil) {
+				targetObject=nil;// no corresponding method > target is nil
+			};
+
+		};
+
+		if(targetObject.notNil) {
+			^targetObject.performList(selector, args);
+		} {
+			^nil;
+		};
+
+	}
+
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 /* ------------------------------------------------
 //////////////////////////////////////////
@@ -427,7 +491,30 @@ and RAPID PLAYBACK
 }
 
 
+
+
+
+/***
+Additions to existing classes...
+
+Allow direct manipulation of sequence name symbols....
+***/
+
+
 + Symbol {
+
+
+	// Used by the SymbolProxy system to call the appropriate messages when
+	// a symbol is used as an object proxy..
+	doesNotUnderstand { | selector...args |
+		var res = SymbolProxyManager.performProxyMethod(this, selector, args);
+
+		if(res.isNil) {
+			"% does not understand method %".format(this.class, selector).throw;
+		};
+
+		^res;
+    }
 
 	checkIsNoteSymbol {
 		if(this.asString.isNoteSymbol.not) {
