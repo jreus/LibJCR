@@ -472,8 +472,8 @@ Smpl {
 
 
 	// Can be called before catch to prepare a LiveSample by name for recording...
-	// you can choose a specific livesample buffer (0-9) by index, or pass -1 to automatically
-	// choose the next one...
+	// you can choose a specific livesample buffer (0-9) by index
+	// or pass -1 to automatically choose the next one...
 	*prepareLiveSample {|name, index=(-1)|
 		var ls;
 		if(name.notNil) {
@@ -519,7 +519,7 @@ Smpl {
 	}
 
 	// Start endless loop recording into a livesample buffer
-	*catchStart {|name, in=0, timeout=30, index=(-1)|
+	*catchStart {|name, in=0, timeout=300, index=(-1)|
 		var ls = this.prepareLiveSample(name, index);
 		if(ls.notNil) {
 			// listen on the given input bus for audio

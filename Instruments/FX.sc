@@ -136,11 +136,13 @@ FX : SymbolProxyManager {
 	// Get fx bus by name for feeding into the output of a synthesis process
 	bus {|name|
 		var unit = units.at(name);
+		var res;
 		if(unit.notNil) {
-			^unit.inBus;
+			res = unit.inBus;
 		} {
 			"No FX unit '%' found".format(name).error;
-		}
+		};
+		^res;
 	}
 
 	// Remove a given unit by name and free its resources....
@@ -504,8 +506,8 @@ FXUnit {
 		};
 
 		// 3. UPDATE STATIC FX CHAIN DESCRIPTIONS
-		this.fxStagesChain = chain;
-		this.fxStagesByType = stagesByType;
+		fxStagesChain = chain;
+		fxStagesByType = stagesByType;
 
 	}
 
@@ -556,6 +558,9 @@ FXUnit {
 				ndef.set(ndefParamName, paramValue);
 				if(currParamVal.isKindOf(NodeProxy)) {
 					// if the param is currently a NodeProxy, be sure to free it..
+					if(FX.verbose) {
+						"Replacing NodeProxy '%' with static value".format(currParamVal).warn;
+					};
 					currParamVal.clear;
 				};
 			} {
@@ -572,11 +577,19 @@ FXUnit {
 	env {|stageName, paramName, env, dur|
 
 		if(ndef.notNil) {
-			var ndefParamName = "%_%".format(stageName, paramName).asSymbol;
+			var ndefParamName;
+			if(paramName.isNil) {
+				ndefParamName = stageName; // probably \inamp or \outamp
+			} {
+				ndefParamName = "%_%".format(stageName, paramName).asSymbol;
+			};
 			if(ndef.get(ndefParamName).notNil) {
-				var mod_ndefid = "%_%_%".format(id, stageName, paramName).asSymbol;
+				var mod_ndefid = "%_%".format(id, ndefParamName).asSymbol;
 				var mod_ndef = Ndef(mod_ndefid, { EnvGen.ar(env, 1, 1.0, 0.0, dur) });
 				ndef.set(ndefParamName, mod_ndef);
+				if(FX.verbose) {
+					"Compiled envelope '%': %".format(mod_ndefid, mod_ndef).warn;
+				};
 			} {
 				"Parameter name '%' does not exist on FX Unit for %".format(ndefParamName, ndefid).error;
 			};
@@ -593,9 +606,16 @@ FXUnit {
 
 	// apply a linear ramp to individual fx stage parameters
 	//  this only works once the ndef has been built
-	ramp {|stageName, paramName, start=1.0, end=0.0, dur=5, curve='lin'|
+	line {|stageName, paramName, start=1.0, end=0.0, dur=5, curve='lin'|
 		^this.env(stageName, paramName, Env([start, start, end], [0, 1], curve), dur);
 	}
+
+	// applies a simple volume fade to the end gain stage of the FX Unit
+	//   identical to line(\outamp, nil, 1.0, 0.0, 10, 'lin')
+	fade {|start=1.0, end=0.0, dur=10, curve='lin'|
+		^this.line(\outamp, nil, start, end, dur, curve);
+	}
+
 
 	// set input mix pre-gain (first gain stage after bus input to fx unit)
 	pre {|gain=1.0|
