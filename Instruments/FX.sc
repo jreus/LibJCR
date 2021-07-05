@@ -30,8 +30,8 @@ FXHelp {
 	*help {
 "
 ws: waveshaping distortion
-  t=type (1:tanh, 2:softclip)
-  p=pre amplification (float)
+  ty=type (1:tanh, 2:softclip)
+  pr=pre amplification (float)
   pv=pre amplification variation (float)
   vt=preamp modulation type (1:LFNoise2 2:SinOsc)
   vr=preamp modulation rate (float)
@@ -52,14 +52,21 @@ hpf: filter
   vr=cutoff modulator rate hz (float)
 
 gn:  gain stage
-mx=mix/gain amount (0-1)
+  mx=mix/gain amount (0-1)
+
+in: mono signal input
+  bs=input bus number (int)
+  pr=pre amplification (float)
+  pn=signal panning (float)
 
 del: delay
-  no params yet
+  dt=delay time in seconds (float)
+  dy=decay time in seconds (float)
+  mx=dry/wet mix (float)
 
 rev: reverb JPverb
   vt=reverb time in seconds, does not effect early reflections
-  da=hf damping as verb decays (0-1.0) - 0 is no damping
+  dm=hf damping as verb decays (0-1.0) - 0 is no damping
   vs=reverb size, scales size of delay lines (0.5 - 5) - values below 1 sound metallic
   er=early reflection shape (0-1.0) 0.707 = smooth exp decay / lower value = slower buildup
   lo=reverb time multiplier in low frequencies (0-1.0)
@@ -283,10 +290,14 @@ FXUnit {
 	*initClass {
 		// Populate stageDescs with format descriptions of each stage type
 		stageDescs = Dictionary.newFrom([
-			\gn, Dictionary.newFrom([\mx, [Float, 1.0]]),
+			\in, Dictionary.newFrom([\bs, [Integer, 0], \pr, [Float, 1.0], \pn, [Float, 0.0]]),
+
+
+
+			\gn, Dictionary.newFrom([\lv, [Float, 1.0]]),
 
 			// distortion type, preamp, preamp_variation, preamp_var_type, preamp_var_rate, mix
-			\ws, Dictionary.newFrom([\t, [Integer, 1], \p, [Float, 20], \pv, [Float, 2],
+			\ws, Dictionary.newFrom([\ty, [Integer, 1], \pr, [Float, 20], \pv, [Float, 2],
 				\vt, [Integer, 1], \vr, [Float, 1], \mx, [Float, 0.8]]),
 
 			// cutoff (hz), co_variation (hz), co_var_type, co_var_rate, recip Q,
@@ -298,11 +309,11 @@ FXUnit {
 				\vr, [Float, 1], \rq, [Float, 0.5]]),
 
 			// delay time, decay, mix
-			\del, Dictionary.newFrom([\dt, [Float, 0.5], \de, [Float, 0.5], \mx, [Float, 0.5]]),
+			\del, Dictionary.newFrom([\dt, [Float, 0.5], \dy, [Float, 0.5], \mx, [Float, 0.5]]),
 
 			// verb time, verb damping, verb size, early reflection shape,
 			// lows time, mids time, his time, mix
-			\rev, Dictionary.newFrom([\vt, [Float, 10.5], \da, [Float, 0.0], \vs, [Float, 2.0],
+			\rev, Dictionary.newFrom([\vt, [Float, 10.5], \dm, [Float, 0.0], \vs, [Float, 2.0],
 				\er, [Float, 0.7], \mx, [Float, 0.5],
 				\lo, [Float, 0.2], \mi, [Float, 0.5], \hi, [Float, 0.5]]),
 
@@ -432,17 +443,21 @@ FXUnit {
 			var sid = st[\type].asString ++ st[\idx].asString;
 
 			switch(st[\type],
-				\gn, { // GAIN
-					var gainval = st[\mx];
-					dsp.add("sig = sig * '%_mx'.kr(%);".format(sid, gainval));
+				\in, { // MONO INPUT bs, pr, pn
+					var inbus = st[\bs], preamp = st[\pr], pan = st[\pn];
+					dsp.add("sig = sig + Pan2.ar(SoundIn.ar('%_bs'.kr(%)), '%_pn'.kr(%), '%_pr'.kr(%));".format(sid, inbus, sid, pan, sid, preamp));
 				},
-				\ws, { // WAVESHAPER t,p,pv,vt,vr,mx
-					var ws_type = st[\t], preamp = st[\p], prevar = st[\pv];
+				\gn, { // GAIN lv
+					var gainlevel = st[\lv];
+					dsp.add("sig = sig * '%_mx'.kr(%);".format(sid, gainlevel));
+				},
+				\ws, { // WAVESHAPER ty,pr,pv,vt,vr,mx
+					var ws_type = st[\ty], preamp = st[\pr], prevar = st[\pv];
 					var prevar_rate = st[\vr], prevar_type = st[\vt], mix = st[\mx];
 					if([1,2].includes(ws_type)) {
 						if([1,2].includes(prevar_type)) {
 							var distfunc, varfunc;
-							dsp.add("v1 = Amplitude.ar(sig, 0.001, 0.01);"); // ??? why ???
+							dsp.add("v1 = Amplitude.ar(sig, 0.001, 0.01);"); // ??? why ??? to adjust after amp?
 
 							// NOTE: varfunc and distfunc cannot be changed without recompiling the ndef
 							varfunc = ["LFNoise2.ar('%_vr'.kr(%), mul: '%_pv'.kr(%))",
@@ -483,12 +498,12 @@ FXUnit {
 					} { LangError("Invalid cutoff variation type '%'".format(covar_type)).throw; };
 
 				},
-				\del, { // DELAY dt, de, mx
-					var delaytime=st[\dt], decay=st[\de], mix=st[\mx];
-					dsp.add("sig = CombL.ar(sig, '%_dt'.kr(%), '%_dt'.kr, '%_de'.kr(%), mul: '%_mx'.kr(%)) + (sig * (1 - '%_mx'.kr));".format(sid, delaytime, sid, sid, decay, sid, mix, sid));
+				\del, { // DELAY dt, dy, mx
+					var delaytime=st[\dt], decaytime=st[\dy], mix=st[\mx];
+					dsp.add("sig = CombL.ar(sig, '%_dt'.kr(%), '%_dt'.kr, '%_de'.kr(%), mul: '%_mx'.kr(%)) + (sig * (1 - '%_mx'.kr));".format(sid, delaytime, sid, sid, decaytime, sid, mix, sid));
 				},
-				\rev, { // REVERB vt, da, vs, er, mx, lo, mi, hi
-					var verbtime=st[\vt], damping=st[\da], verbsize=st[\vs];
+				\rev, { // REVERB vt, dm, vs, er, mx, lo, mi, hi
+					var verbtime=st[\vt], damping=st[\dm], verbsize=st[\vs];
 					var earlyref=st[\er], lows=st[\lo], mids=st[\mi], highs=st[\hi], mix=st[\mx];
 					dsp.add("v1 = JPverb.ar(sig, '%_vt'.kr(%), '%_da'.kr(%), '%_vs'.kr(%), '%_er'.kr(%), 0.8, 0.9, '%_lo'.kr(%), '%_mi'.kr(%), '%_hi'.kr(%), 200, 3000);".format(sid, verbtime, sid, damping, sid, verbsize, sid, earlyref, sid, lows, sid, mids, sid, highs));
 					dsp.add("sig = v1.madd('%_mx'.kr(%)) + sig.madd( 1 - '%_mx'.kr);".format(sid, mix, sid));
