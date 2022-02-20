@@ -100,6 +100,7 @@ BelaServer {
 }
 
 // NTS:: Extend ServerOptions instead
+/*
 BelaServerOptions {
 	var <>blockSize = 16;
 	var <>numAnalogInChannels = 8;
@@ -122,4 +123,4 @@ BelaServerOptions {
 	}
 
 }
-
+*/

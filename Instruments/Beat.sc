@@ -168,38 +168,69 @@ Beat : SymbolProxyManager {
 		};
 
 		// 2. create or update the sequence
-		seq = this.sam(name, sid, pattern, zeroDegree, sdurscale, outbus, start, dur, rate, pan, autoplay, stepd);
+		seq = this.sam(name, sid, pattern, zeroDegree, sdurscale, outbus, start, dur, rate, pan, stepd);
 		seq.liveSampler = true; // protection flag against using catch and catchStart accidentally
 
 		^seq;
 	}
 
 	//********** Create / reference a SAMPLE SEQUENCER ************//
-	sam {|name, sampleName, pattern, zeroDegree, sdurscale, outbus, start, dur, rate, pan, autoplay=true, stepd=nil|
+	sam {|name, smpl=nil, autoplay=true|
 		var seq;
-		if(Smpl.at(sampleName).notNil) {
-			seq = playersByName.at(name);
-			if(seq.isNil) {
-				if(name.class != Symbol) {
-					"Bad sequence name '%'! Sequence name must be a Symbol".format(name).throw;
-				};
-
-				seq = SampleSequence.new(server, this, tracksGroup, name, sampleName, pattern, zeroDegree, sdurscale, outbus, start, dur, rate, pan, autoplay, stepd);
-
-				this.register(seq);
-
-				if(isPlaying && autoplay) {
-					"Start Platback with clock %".format(clock).warn;
-					seq.play(clock);
-				};
-			} {
-				seq.pr_update(sampleName, pattern, zeroDegree, sdurscale, outbus, start, dur, rate, pan, stepd);
+		seq = playersByName.at(name);
+		if(seq.isNil) {
+			if(name.class != Symbol) {
+				"Bad sequence name '%'! Sequence name must be a Symbol".format(name).throw;
 			};
 
-		}
+			// Make a new Sample Sequence & register it
+			seq = SampleSequence.new(server, this, tracksGroup, name);
+			this.register(seq);
+
+			if(smpl.notNil) {
+				seq.smpl(smpl);
+			};
+
+			if(isPlaying && autoplay) {
+				"Start Playback with clock %".format(clock).warn;
+				seq.play(clock);
+			};
+		} {
+			if(smpl.notNil) {
+				seq.smpl(smpl);
+			};
+		};
+		^seq;
+	}
+
+
+	// Old sampleseq accessor with lots of arguments
+	setSam {|name, sampleName, pattern, zeroDegree, sdurscale, out,
+		start, dur, rate, pan, autoplay=true, stepd|
+		var seq;
+		seq = playersByName.at(name);
+		if(seq.isNil) {
+			if(name.class != Symbol) {
+				"Bad sequence name '%'! Sequence name must be a Symbol".format(name).throw;
+			};
+
+			// Make a new Sample Sequence & register it
+			seq = SampleSequence.new(server, this, tracksGroup, name, sampleName, pattern, zeroDegree, sdurscale, out, start, dur, rate, pan, stepd);
+			this.register(seq);
+
+			if(isPlaying && autoplay) {
+				"Start Playback with clock %".format(clock).warn;
+				seq.play(clock);
+			};
+		} {
+			// update existing seq
+			seq.pr_update(sampleName, pattern, zeroDegree, sdurscale, out, start, dur, rate, pan, stepd);
+		};
 
 		^seq;
 	}
+
+
 
 	//********** Create / reference a SYNTH SEQUENCER ************//
 	syn {|name, instrumentName, pattern, rootPitch, durScale, outbus, pan, scale, autoplay=true|
@@ -211,7 +242,7 @@ Beat : SymbolProxyManager {
 					"Bad sequence name '%'! Sequence name must be a Symbol".format(name).throw;
 				};
 
-			seq = SynthSequence.new(server, this, tracksGroup, name, instrumentName, pattern, rootPitch, durScale, outbus, pan, scale, autoplay);
+			seq = SynthSequence.new(server, this, tracksGroup, name, instrumentName, pattern, rootPitch, durScale, outbus, pan, scale);
 
 			this.register(seq);
 
@@ -277,7 +308,6 @@ EventSequence {
 	var <zeroDegree=0;
 	var <zeroOctave=5;
 	var <pitchScale;
-	var <autoPlay;
 	var <fixedStepDelta;
 
 	*initClass {
@@ -286,15 +316,14 @@ EventSequence {
 		//this.pr_loadEventTypes;
 	}
 
-	*new {|serv, parent, synthgroup, seqid, outbus, autoplay|
-		^super.new.prInitEventSequence(serv, parent, synthgroup, seqid, outbus, autoplay);
+	*new {|serv, parent, synthgroup, seqid, outbus|
+		^super.new.prInitEventSequence(serv, parent, synthgroup, seqid, outbus);
 	}
 
-	prInitEventSequence {|serv, parent, synthgroup, seqid, outbus, autoplay|
+	prInitEventSequence {|serv, parent, synthgroup, seqid, outbus|
 		id = seqid;
 		parentBeat = parent;
 		pdefId = id ++ "_player" ++ rand(100);
-		autoPlay = autoplay;
 		trackBus = Bus.audio(serv, 2);
 		trackFX = Synth(\trackInsert_2ch, [\bus, trackBus, \amp, trackAmp, \dest, outbus], synthgroup, \addToTail);
 	}
@@ -357,12 +386,13 @@ EventSequence {
 				});
 			};
 
+			outBus = outbus;
+			trackFX.set(\dest, outBus);
+
 			if(Beat.verbose) {
 				"Set % track destination to '%'".format(id, outBus).warn;
 			};
 
-			outBus = outbus;
-			trackFX.set(\dest, outBus);
 		}
 		^this;
 	}
@@ -393,8 +423,11 @@ EventSequence {
 	}
 
 
-	stepd {|stepdval|
+	stepd {|stepdval, rebuild=false|
 		fixedStepDelta = stepdval;
+		if(rebuild) {
+			this.pr_setPattern();
+		};
 		^this;
 	}
 
@@ -482,8 +515,20 @@ EventSequence {
 
 
 	// Start and stop the Pdef
-	play {|clock|
-		pbindef.play(quant: [clock.beatsPerBar, 0, 0, 0], argClock: clock, protoEvent: ());
+	play {|clock, quant|
+		if(clock.isNil) {
+			clock = TempoClock;
+		};
+
+		if(quant.isNil) {
+			quant = Quant(clock.beatsPerBar, 0, 0);
+		};
+
+		if(pbindef.notNil) {
+			pbindef.play(quant: [clock.beatsPerBar, 0, 0], argClock: clock, protoEvent: ());
+		} {
+			"No pattern compiled, ignoring play command".warn;
+		};
 		^this;
 	}
 
@@ -513,6 +558,7 @@ SampleSequence : EventSequence {
 	var <sampleName;
 	var <sampleFileFrames;
 	var <sampleFileDuration;
+	var <kitID;
 
 	// Pattern playback...
 	var <sampleStartFrame=0;
@@ -521,64 +567,116 @@ SampleSequence : EventSequence {
 	var <samplePlayRate=1.0;
 	var <samplePanning=0.0;
 
-
+	// Pattern state
+	var <ampPattern;
 
 	// start: in seconds / dur : in seconds
-	*new {|serv, parent, synthgroup, seqid, smplname, pattern=nil, zeropitch, sampledurscale, outbus, start, dur, rate, pan, autoplay, stepd|
-		^super.new(serv, parent, synthgroup, seqid, outbus, autoplay).init(smplname, pattern, zeropitch, sampledurscale, outbus, start, dur, rate, pan, stepd);
+	*new {|serv, parent, synthgroup, seqid, smplname, pattern=nil, zeropitch, sampledurscale, outbus, start, dur, rate, pan, stepd|
+		^super.new(serv, parent, synthgroup, seqid, outbus).init(smplname, pattern, zeropitch, sampledurscale, outbus, start, dur, rate, pan, stepd);
 	}
 
 	// start: in seconds / dur : in seconds
 	init {|smplname, pattern, zeropitch, sampledurscale, outbus, start, dur, rate, pan, stepd|
+
 		this.pr_update(smplname, pattern, zeropitch, sampledurscale, outbus, start, dur, rate, pan, stepd);
+
 	}
 
 	// Update the currently running sequence
 	pr_update {|smplname, pattern, zeropitch, sdurscale, outbus, start_s, dur_s, rate, pan, stepd|
 
-		var smpl;
-		var starttime, startframe, endframe, endtime;
-
-		smpl = Smpl.at(smplname);
-		if(smpl.isNil) {
-			// TODO: make this more graceful....
-			"Sample '%' could not be found".format(smplname).throw;
-		};
-
-		if((smplname != sampleName)) { // a new sample file is being used for the first time
-			sampleName = smplname;
-			sampleFileDuration = smpl.duration;
-			sampleFileFrames = smpl.numFrames;
-		};
-
-		// rootpitch defaults to \c5 > this is degree: 0 root: 0 octave: 5 in the
-
-		// update track insert output
+		this.smpl(smplname);
 		this.out(outbus);
-
-		// default note event
 		this.zeroPitch(zeropitch);
-
-		// timing
 		this.stepd(stepd);
 		this.pan(pan);
 
-		// Sample playback - startframe & endframe, etc..
 		this.dur(sdurscale);
 		this.rate(rate);
 
+		// Sample playback - startframe & endframe, etc..
 		this.pr_setStartAndEndFrames(start_s, dur_s);
 
 		this.pr_setPattern(pattern);
 	}
 
 
-	// SAMPLE PLAYER: Parse text pattern into pbindef
-	pr_setPattern {|pattern, type=\PAT_AMPLITUDE|
+	// NOTE: does not rebuild the pattern, but does set values on a live pattern if it exists
+	pr_setStartAndEndFrames {|start_s, dur_s|
+
+		var end_s;
+
+		if(sampleName.notNil) {
+
+		if(start_s.isNil.or { start_s < 0 }) {
+			start_s = 0;
+		};
+
+		if(start_s.inclusivelyBetween(0, sampleFileDuration).not) {
+			"start time % out of bounds %, using 0".format(start_s, sampleFileDuration).error;
+			start_s = 0;
+		};
+
+		if(dur_s.isNil) { // play from start to end by default
+			if(samplePlaybackDuration.isNil) {
+				dur_s = sampleFileDuration - start_s;
+			} {
+				dur_s = samplePlaybackDuration;
+			};
+		};
+
+		end_s = start_s + dur_s;
+
+		if(end_s.inclusivelyBetween(0, sampleFileDuration).not) {
+			"end time out of bounds with duration % and start time %, using %".format(dur_s, start_s, sampleFileDuration).error;
+			end_s = sampleFileDuration;
+		};
+
+		// convert start and end to frame positions
+		sampleStartFrame = start_s * (sampleFileFrames / sampleFileDuration);
+		sampleEndFrame = end_s * (sampleFileFrames / sampleFileDuration);
+		samplePlaybackDuration = end_s - start_s;
+
+		if(pbindef.notNil) {
+			Pbindef(pdefId, \start, sampleStartFrame, \end, sampleEndFrame);
+		};
+
+		};
+
+	}
+
+	//************** PARSE & COMPILE SAMPLE PATTERN **************//
+	// type can be \amp \dur \pitch
+	// if no pattern is specified, and a previous pattern exists
+	// then a recompile is performed
+	pr_setPattern {|pattern, type=\amp|
 		var parsedRaw, parsedByMeasure, pb, smpl;
 		var measureIdx=0, measureStepDelta;
 
-		smpl = Smpl.at(sampleName);
+		if(pattern.isNil) {
+			if(ampPattern.isNil) {
+				// set a default pattern if no prior pattern exists
+				if(sampleName.isNil) {
+					pattern = "----";
+				} {
+					pattern = "d-";
+				};
+			} {
+				pattern = ampPattern;
+			};
+			type = \amp;
+
+			"Using default pattern '%'".format(pattern).warn;
+		};
+
+		if(type == \amp) {
+			ampPattern = pattern;
+		};
+
+		if(sampleName.notNil) {
+			smpl = Smpl.at(sampleName);
+		};
+
 		parsedByMeasure = List.new;
 		pattern.stripWhiteSpace().do{|ch|
 			var ms;
@@ -597,21 +695,31 @@ SampleSequence : EventSequence {
 			};
 
 			switch(ch,
-				$ , { // new measure
+				$ , { // space - new measure
 					measureIdx = measureIdx + 1;
 				},
-				$-, { // rest
+				$-, { // dash - rest
 					ms[\parsedAmp].add(nil);
 					ms[\rawPattern] = ms[\rawPattern] ++ $-;
 				},
-				{ // event
-					if(type == \PAT_AMPLITUDE) {
+				{ // anything else - an event
+					if(type == \amp) {
 						if(ampMap.includesKey(ch)) {
 							ms[\parsedAmp].add(ch);
 							ms[\rawPattern] = ms[\rawPattern] ++ ch;
 						} {
 							"Invalid amp value '%' in pattern '%'".format(ch, pattern).throw;
 						}
+					};
+
+					// Pitch pattern
+					if(type == \pitch) {
+
+					};
+
+					// Dur pattern
+					if(type == \dur) {
+
 					};
 				}
 			);
@@ -647,10 +755,7 @@ SampleSequence : EventSequence {
 		};
 
 
-		pb = List.new;
-
-
-		// Build pbind
+		// Pattern Builder / PBind
 		pb = Dictionary.new;
 		pb.put( \type, \smpl);
 		pb.put( \scale, pitchScale );
@@ -667,105 +772,205 @@ SampleSequence : EventSequence {
 		pb.put(\amp, List.new);
 
 		parsedByMeasure.do {|ms|
-			pb[\smpl].add( Pseq(ms[\parsedSmpl]) );
-			pb[\dur].add( Pseq(ms[\parsedDur]) );
-			pb[\degree].add( Pseq(ms[\parsedDegree]) );
-			pb[\delta].add( Pseq(ms[\parsedDelta]) );
-			pb[\amp].add( Pseq(ms[\parsedAmp]) );
+			pb[\smpl].add( Pseq(ms[\parsedSmpl].asArray) );
+			pb[\dur].add( Pseq(ms[\parsedDur].asArray) );
+			pb[\degree].add( Pseq(ms[\parsedDegree].asArray) );
+			pb[\delta].add( Pseq(ms[\parsedDelta].asArray) );
+			pb[\amp].add( Pseq(ms[\parsedAmp].asArray) );
 		};
 
-		pb[\dur] = Pseq(pb[\dur], inf);
-		pb[\degree] = Pseq(pb[\degree], inf);
-		pb[\delta] = Pseq(pb[\delta], inf);
-		pb[\amp] = Pseq(pb[\amp], inf);
+		pb[\dur] = Pseq(pb[\dur].asArray, inf);
+		pb[\degree] = Pseq(pb[\degree].asArray, inf);
+		pb[\delta] = Pseq(pb[\delta].asArray, inf);
+		pb[\amp] = Pseq(pb[\amp].asArray, inf);
 
 
-		// Sample Specific Keys
-		pb[\smpl] = Pseq(pb[\smpl], inf);
+		// \smpl Specific event Keys
+		pb[\smpl] = Pseq(pb[\smpl].asArray, inf);
 		pb.put(\start, sampleStartFrame );
 		pb.put(\end, sampleEndFrame );
-		pb.put(\rootPitch, smpl.rootPitch.f );
+		if(smpl.notNil) {
+			pb.put(\rootPitch, smpl.rootPitch.f );
+		};
 		pb.put(\rate, samplePlayRate );
 
 
 		pbindef = Pbindef(pdefId, *(pb.getPairs));
 		patternString = pattern;
 		"Successfully built pattern '%'".format(pattern).postln;
+		if(Beat.verbose) {
+			pb.postln;
+		};
 	}
 
-	// NOTE: does not rebuild the pattern, but does set values on a live pattern if it exists
-	pr_setStartAndEndFrames {|start_s, dur_s|
 
-		var end_s;
-		if(start_s.isNil.or { start_s < 0 }) {
-			start_s = 0;
+	//*************************** MUTATORS ***********************//
+
+	// Set sample id, start point and duration in seconds
+	// TODO: can this be set on a running pbindef
+	smpl {|sid, start_s, dur_s|
+		var smpl;
+
+		if(sid.notNil) {
+			smpl = Smpl.at(sid);
+
+			if(smpl.isNil) {
+				// TODO: make this more graceful....
+				"Sample '%' could not be found".format(sid).throw;
+			};
+
+			if((sid != sampleName)) { // a new sample file is being used for the first time
+
+				if((smpl.class != LiveSample).and { Smpl.at(sampleName).class == LiveSample }) {
+					// We are switching from a livesample to a regular sample
+					if(Beat.verbose) {
+						"Converted seq '%' to fixed sample '%' from live '%'".format(id, sid, sampleName).warn;
+					};
+					liveSampler = false;
+				};
+
+				sampleName = sid;
+				sampleFileDuration = smpl.duration;
+				sampleFileFrames = smpl.numFrames;
+
+				"Changed sample to '%'".format(sampleName).post;
+			};
+
+			this.pr_setStartAndEndFrames(start_s, dur_s);
 		};
 
-		if(start_s.inclusivelyBetween(0, sampleFileDuration).not) {
-			"start time % out of bounds %, using 0".format(start_s, sampleFileDuration).error;
-			start_s = 0;
-		};
+	}
 
-		if(dur_s.isNil) { // play from start to end by default
-			if(samplePlaybackDuration.isNil) {
-				dur_s = sampleFileDuration - start_s;
-			} {
-				dur_s = samplePlaybackDuration;
+	// Add a pattern
+	pattern {|pattern, ptype=\amp|
+		this.pr_setPattern(pattern, ptype);
+	}
+
+	// Convernience method to set an amplitude pattern
+	pat {|pattern|
+		this.pr_setPattern(pattern, \amp);
+	}
+
+
+
+
+
+	//((((((((((((((((((((((((LIVE SAMPLING)))))))))))))))))))))))//
+
+
+	//********** CONVERT THIS SAMPLE SEQUENCE TO A LIVESAMPLER ************//
+	// in : the input bus to record from
+	// must be followed with a call to .rec or .recStart
+	live {|in=0, timeout=30|
+		var seq, smpl, sid;
+
+		if(liveSampler.not) { // If this sequence is not configured as a livesampler...
+			var smpl, sid;
+			sid = "ls_" ++ id; // construct a sample id name
+
+			// 1. Request the live sample buffer from Smpl with id sid
+			//    or create one if it doesn't already exist...
+			smpl = Smpl.at(sid);
+			if(smpl.isNil) {
+				smpl = Smpl.prepareLiveSample(sid);
+				if(Beat.verbose) {
+					"\nAllocating new LiveSample buffer '%': %".format(sid, smpl).warn;
+				};
+			};
+
+			// 2. update the sequence's sample buffer
+			this.smpl(sid);
+
+			liveSampler = true;
+			if(Beat.verbose) {
+				"\nConverting sequence '%' to live sample '%'".format(id, sid).warn;
 			};
 		};
 
-		end_s = start_s + dur_s;
-
-		if(end_s.inclusivelyBetween(0, sampleFileDuration).not) {
-			"end time out of bounds with duration % and start time %, using %".format(dur_s, start_s, sampleFileDuration).error;
-			end_s = sampleFileDuration;
-		};
-
-		// convert start and end to frame positions
-		sampleStartFrame = start_s * (sampleFileFrames / sampleFileDuration);
-		sampleEndFrame = end_s * (sampleFileFrames / sampleFileDuration);
-		samplePlaybackDuration = end_s - start_s;
-
-		if(pbindef.notNil) {
-			Pbindef(pdefId, \start, sampleStartFrame, \end, sampleEndFrame);
-		};
-
+		^seq;
 	}
 
-
-
-
-
-
-
-	//***** PUBLIC API *****//
-
-
-	// Live Sampling Methods...
 
 	// One shot live sampling...
-	// TODO: this and especially the use of catch in Beat.live is a bit messy, needs refact
-	rec {|inbus=0, ampthresh=0.01, silencethresh=1, timeout=10|
+	// TODO: this and especially the use of catch in Beat.live is a bit messy, needs refactoring
+	rec {|in=0, ampthresh=0.01, silencethresh=1, timeout=10|
 		if(liveSampler) {
-			Smpl.catch(sampleName, inbus, ampthresh, silencethresh, timeout=30);
+			"About to record with input '%', '%'".format(in, in.class).warn;
+			switch(in.class,
+				Integer, { // bus id
+					"Found int!".warn;
+					Smpl.catch(sampleName, in, ampthresh, silencethresh, timeout);
+				},
+				Ndef, { // ndef
+					"Found ndef!".warn;
+					Smpl.catch(sampleName, in, ampthresh, silencethresh, timeout);
+				},
+				Symbol, { // fx unit or sequence id
+					var insource;
+					"Found symbol!".warn;
+					// TODO:
+					// 1. check if it's a registered fx unit or sequence or ndef
+					// 2. get the output ndef of fx unit (??? sequence track insert ???)
+					// 3. Smpl.catch(sampleName, insource, ampthresh, silencethresh, timeout);
+					//var sourcebus = in.getOutputBus; // must respond to this
+					"Not implemented".throw;
+				},
+				{ "Invalid input source '%', must be bus number, fx unit or ndef.".format(in).error;  }
+			);
+
 		} {
-			"Sequence % is not a LiveSampler".format(id).throw;
+			"Sequence % is not a LiveSampler, ignoring".format(id).error;
 		};
+		^this;
 	}
 
-	// continuous sampling...
-	recStart {|inbus=0, timeout=360|
+	// TODO: This doesn't work!
+	// Continuous live sampling...
+	// in - can be an input bus, an ndef, or a symbol (representing a FX unit or Seq ID)
+	//      TODO: right now only input bus works...
+	recStart {|in=0, timeout=360|
 		if(liveSampler) {
-			Smpl.catchStart(sampleName, inbus, timeout);
+			//Smpl.catchStart(sampleName, in, timeout);
+			switch(in.class,
+				Integer, { // bus id
+					"CatchStart on bus '%'".format(in).warn;
+					Smpl.catchStart(sampleName, in, timeout);
+				},
+				Ndef { // ndef
+					"Not implemented".throw;
+					//Smpl.catchStart(sampleName, in, timeout);
+				},
+				Symbol, { // fx unit or sequence id
+					var insource;
+					// TODO:
+					// 1. check if it's a registered fx unit or sequence
+					// 2. get the output ndef of fx unit (??? sequence track insert ???)
+					// 3. Smpl.catchStart(sampleName, insource, timeout);
+					//var sourcebus = in.getOutputBus; // must respond to this
+					"Not implemented".throw;
+				},
+				{
+					"Invalid input source '%', must be bus number, fx unit or ndef.".format(in).error;
+
+				}
+			);
+
 		} {
-			"Sequence % is not a LiveSampler".format(id).throw;
+			"Sequence % is not a LiveSampler, ignoring".format(id).error;
 		};
+		^this;
 	}
 
 	recStop {
 		Smpl.catchStop(sampleName);
+		^this;
 	}
 
+
+
+
+
+	/***** GETTERS SETTERS AND ACTIVATORS *******/
 
 	// set start position (in seconds, charcode, frames?) : a float, a string, a SequencedCollection
 	//   also can set sample playback duration in seconds : a float
@@ -813,10 +1018,6 @@ SampleSequence : EventSequence {
 		^this;
 	}
 
-	// Convernience method to set an amplitude pattern
-	pat {|pattern|
-		this.pr_setPattern(pattern, \PAT_AMPLITUDE);
-	}
 
 
 	// TODO: this method doesn't work, it's old cruft
@@ -863,8 +1064,8 @@ SynthSequence : EventSequence {
 	var <pitchFactor;
 
 
-	*new {|serv, parent, synthgroup, seqid, instname, pattern=nil, zeropitch, durscale, outbus, pan, notescale, autoplay|
-		^super.new(serv, parent, synthgroup, seqid, outbus, autoplay).init(instname, pattern, zeropitch, durscale, outbus, pan, notescale);
+	*new {|serv, parent, synthgroup, seqid, instname, pattern=nil, zeropitch, durscale, outbus, pan, notescale|
+		^super.new(serv, parent, synthgroup, seqid, outbus).init(instname, pattern, zeropitch, durscale, outbus, pan, notescale);
 	}
 
 	init {|instname, pattern, zeropitch, durscale, outbus, pan, notescale|

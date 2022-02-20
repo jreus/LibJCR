@@ -5,15 +5,16 @@ FX Units Livecoda
 
 /*
 @usage
+f = FX.new(s, Group.new(s, \addAfter));
+f.unit(\fx2, 2, "rev(vs100 lo0.2 mi0.5 hi0.1 mx0.7)");
+f.unit(\fx1, 2, "del() ws() rev()");
+
 
 FX.setUnit("fx1", "ws rev");
 b.syn("s1", \karp, "0 1 2 3", out: FX.bus("fx1"));
 
-
-
-
 FX Unit Microlanguage
-See FX.help()
+See FXHelp.help()
 
 ws rev
 ws(t1 p20 v2 mx0.8) rev(vt10.5 vs2 er0.7 lo0.2 mi0.5 hi0.4 mx0.5) ws(t2 p5 v1 mx0.5)  lpf(co1200 cv200 rq0.7)
@@ -28,57 +29,81 @@ FXHelp {
 
 	// Microlang help string
 	*help {
-"
+		"
 ws: waveshaping distortion
-  ty=type (1:tanh, 2:softclip)
-  pr=pre amplification (float)
-  pv=pre amplification variation (float)
-  vt=preamp modulation type (1:LFNoise2 2:SinOsc)
-  vr=preamp modulation rate (float)
-  mx=wet/dry mix (0-1)
+ty=type (1:tanh, 2:softclip)
+pr=pre amplification (float)
+pv=pre amplification variation (float)
+vt=preamp modulation type (1:LFNoise2 2:SinOsc)
+vr=preamp modulation rate (float)
+mx=wet/dry mix (0-1)
 
 lpf: filter
-  co=cutoff hz (float)
-  cv=cutoff variation hz (float)
-  rq=reciprocal of q (float)
-  vt=cutoff modulator type (1: LFNoise2, 2: SinOsc)
-  vr=cutoff modulator rate hz (float)
+co=cutoff hz (float)
+cv=cutoff variation hz (float)
+rq=reciprocal of q (float)
+vt=cutoff modulator type (1: LFNoise2, 2: SinOsc)
+vr=cutoff modulator rate hz (float)
 
 hpf: filter
-  co=cutoff hz (float)
-  cv=cutoff variation hz (float)
-  rq=reciprocal of q (float)
-  vt=cutoff modulator type (1: LFNoise2, 2: SinOsc)
-  vr=cutoff modulator rate hz (float)
+co=cutoff hz (float)
+cv=cutoff variation hz (float)
+rq=reciprocal of q (float)
+vt=cutoff modulator type (1: LFNoise2, 2: SinOsc)
+vr=cutoff modulator rate hz (float)
 
 gn:  gain stage
-  mx=mix/gain amount (0-1)
+lv=gain level (float: 0-1)
 
-in: mono signal input
-  bs=input bus number (int)
-  pr=pre amplification (float)
-  pn=signal panning (float)
+in: mono signal mic input (SoundIn)
+bs=index of audio input bus (int)
+pr=pre amplification (float)
+pn=signal panning (float)
+
+xin: arbitrary bus input (In)
+bs=bus number (int)
+ch=channels (int)
+pr=pre amplification (float)
+pn=signal panning (float) - mixes multichannel down to mono
+
+out: signal output, number of channels matches whatever signal is at that point in the chain
+bs=ouput bus number (int)
+pr=pre amplification (float)
 
 del: delay
-  dt=delay time in seconds (float)
-  dy=decay time in seconds (float)
-  mx=dry/wet mix (float)
+dt=delay time in seconds (float)
+dy=decay time in seconds (float)
+mx=dry/wet mix (float)
 
 rev: reverb JPverb
-  vt=reverb time in seconds, does not effect early reflections
-  dm=hf damping as verb decays (0-1.0) - 0 is no damping
-  vs=reverb size, scales size of delay lines (0.5 - 5) - values below 1 sound metallic
-  er=early reflection shape (0-1.0) 0.707 = smooth exp decay / lower value = slower buildup
-  lo=reverb time multiplier in low frequencies (0-1.0)
-  mi=reverb time multiplier in mid frequencies (0-1.0)
-  hi=reverb time multiplier in hi frequencies (0-1.0)
-  mx=wet/dry mix (0-1)
+vt=reverb time in seconds, does not effect early reflections
+dm=hf damping as verb decays (0-1.0) - 0 is no damping
+vs=reverb size, scales size of delay lines (0.5 - 5) - values below 1 sound metallic
+er=early reflection shape (0-1.0) 0.707 = smooth exp decay / lower value = slower buildup
+lo=reverb time multiplier in low frequencies (0-1.0)
+mi=reverb time multiplier in mid frequencies (0-1.0)
+hi=reverb time multiplier in hi frequencies (0-1.0)
+mx=wet/dry mix (0-1)
+
+cmp: compressor (Compander)
+th=amplitude threshhold for compression to kick in (0.0-1.0)
+ra=compression ratio (0.0-1.0) - 1.0 is no compression, 0.333 is a ratio of 1/3
+at=attack in seconds
+re=release in seconds
+s_=side chain signal, either a fx unit name or ndef name
+sb=side chain signal bus
+sl=side chain level (0.0-1.0)
+mx=wet/dry mix (0.0-1.0)
 
 ".postln;
 	}
 
 }
 
+
+
+
+/* FX MANAGER */
 FX : SymbolProxyManager {
 	var <server;
 	var <fxgroup; // should be at the end of the server's group structure
@@ -100,6 +125,9 @@ FX : SymbolProxyManager {
 	}
 
 	*getManager {
+		if(singleton.isNil) {
+			"FX Manager is not initialized, use FX.new(server, group) to create the singleton instance".error;
+		};
 		^singleton;
 	}
 
@@ -107,12 +135,28 @@ FX : SymbolProxyManager {
 		^this;
 	}
 
+	// Usually you don't want to mess with the master outBus and gain
+	//   but sometimes you might want to, for example, sending the signal to an
+	//   external app via a virtual audio bus
+	master {|outbus=0, gain=1.0|
+		if(this.mastersynth.notNil) {
+			this.mastersynth.set(\outbus, outbus, \gain, gain);
+		};
+	}
+
 	init {|serv, group|
 		server = serv;
-		// TODO: probably want to create this group automatically here at the end of
-		//       the server's node order
+
+		"Setting Ndef.defaultServer to '%'".format(server).warn;
+		Ndef.defaultServer = server;
+
+		if (group.isNil) {
+			group = Group.new(server, \addAfter);
+		};
+
 		fxgroup = group;
 		"Found fx group %".format(fxgroup).warn;
+
 		this.loadSynthDefsEventTypes();
 
 
@@ -120,19 +164,46 @@ FX : SymbolProxyManager {
 		cleanbus = Bus.audio(server, 2);
 		fxbus = Bus.audio(server, 2);
 		fxmixproxy = NodeProxy.new(server, \audio, 2);
-		fxmixproxy.setGroup(fxgroup);
-		fxmixproxy.play(fxbus, 2, fxgroup);
+		//fxmixproxy.setGroup(fxgroup);
+		fxmixproxy.play(out: fxbus, numChannels: 2, group: fxgroup, multi: true, addAction: \addToHead);
 		singleton = this;
+
+		// Create master node
+		// mastersynth = {|gain=1.0, fxbus, cleanbus, outbus=0|
+		// 	var mix, fxsig, cleansig;
+		// 	cleansig = In.ar(cleanbus, 2);
+		// 	fxsig = In.ar(fxbus, 2);
+		// 	mix = cleansig+fxsig;
+		// 	mix = LeakDC.ar(Limiter.ar(mix, 1.0, 0.001));
+		// 	//Out.ar(outbus, mix * gain);
+		// 	mix * gain;
+		// }.play(target: server, outbus: 0, addAction: \addToTail);
+
+
+
+		{
+			server.sync;
+			if(mastersynth.isNil) {
+				"FX: Creating master node".postln;
+				mastersynth = Synth(\mixMaster, [
+					\fxbus, fxbus,
+					\cleanbus, cleanbus
+				], fxgroup, \addToTail);
+
+			};
+		}.fork(AppClock);
+
 	}
 
+
 	loadSynthDefsEventTypes {
-		SynthDef(\mixMaster, {|gain=1.0, fxbus, cleanbus|
+		SynthDef(\mixMaster, {|gain=1.0, fxbus, cleanbus, outbus=0|
 			var mix, fxsig, cleansig;
 			cleansig = In.ar(cleanbus, 2);
 			fxsig = In.ar(fxbus, 2);
 			mix = cleansig+fxsig;
 			mix = LeakDC.ar(Limiter.ar(mix, 1.0, 0.001));
-			Out.ar(0, mix * gain);
+			Out.ar(outbus, mix * gain);
 		}).add;
 	}
 
@@ -140,7 +211,8 @@ FX : SymbolProxyManager {
 		^units.at(name);
 	}
 
-	// Get fx bus by name for feeding into the output of a synthesis process
+	// Get the input bus of an FXUnit by name
+	// this input bus can be used as the output of synths to go into the FX unit
 	bus {|name|
 		var unit = units.at(name);
 		var res;
@@ -156,10 +228,10 @@ FX : SymbolProxyManager {
 	freeUnit {|name|
 		var unit = units.at(name);
 		if(unit.notNil) {
-			this.unregister(name);
+			this.unregister(unit);
 			unit.freeUnit; // free resources...
 		} {
-			"Beat.clear: Sequence '%' does not exist".format(name).error;
+			"FX Unit '%' does not exist".format(name).error;
 		}
 	}
 
@@ -194,15 +266,6 @@ FX : SymbolProxyManager {
 	// Allocate the data structure for a new FX unit but do not compile the Ndef
 	allocUnit {|name, inChannels=2|
 		var unit;
-
-		if(mastersynth.isNil) {
-			"First FX Unit allocation ~ creating mastersynth".postln;
-			mastersynth = Synth(\mixMaster, [
-				\fxbus, fxbus,
-				\cleanbus, cleanbus
-			], fxgroup, \addToTail);
-
-		};
 
 		if(name.class != Symbol) {
 			"FX Unit name must be a symbol, received %: '%'".format(name.class, name).throw;
@@ -262,7 +325,7 @@ FX : SymbolProxyManager {
 
 
 /* FX UNIT
- _______  __  _   _ _   _ ___ _____
+_______  __  _   _ _   _ ___ _____
 |  ___\ \/ / | | | | \ | |_ _|_   _|
 | |_   \  /  | | | |  \| || |  | |
 |  _|  /  \  | |_| | |\  || |  | |
@@ -290,9 +353,15 @@ FXUnit {
 	*initClass {
 		// Populate stageDescs with format descriptions of each stage type
 		stageDescs = Dictionary.newFrom([
+			// audio sound in, bus index, preamp, panning
 			\in, Dictionary.newFrom([\bs, [Integer, 0], \pr, [Float, 1.0], \pn, [Float, 0.0]]),
 
+			// arbitrary audio bus out, bus output, preamp
+			\out, Dictionary.newFrom([\bs, [Integer, 0], \pr, [Float, 1.0]]),
 
+			// arbitrary audio bus input: bus index, num channels, preamp, pan (mix multich to mono if set)
+			\xin, Dictionary.newFrom([\bs, [Integer, 0], \ch, [Integer, 2], \pr, [Float, 1.0],
+				\pn, [Float, nil]]),
 
 			\gn, Dictionary.newFrom([\lv, [Float, 1.0]]),
 
@@ -313,9 +382,16 @@ FXUnit {
 
 			// verb time, verb damping, verb size, early reflection shape,
 			// lows time, mids time, his time, mix
-			\rev, Dictionary.newFrom([\vt, [Float, 10.5], \dm, [Float, 0.0], \vs, [Float, 2.0],
+			\rev, Dictionary.newFrom([\vt, [Float, 10.5], \dm, [Float, 0.0],
+				\vs, [Float, 2.0],
 				\er, [Float, 0.7], \mx, [Float, 0.5],
 				\lo, [Float, 0.2], \mi, [Float, 0.5], \hi, [Float, 0.5]]),
+
+			// amp threshhold, comp ratio, comp attack, comp release
+			// side chain signal, side chain level, wet/dry mix
+			\cmp, Dictionary.newFrom([\th, [Float, 0.5], \ra, [Float, 1/3],
+				\at, [Float, 0.01], \re, [Float, 0.1],
+				\s_, [Symbol, nil], \sb, [Integer, nil], \sl, [Float, 1.0], \mx, [Float, 1.0]]),
 
 
 		]);
@@ -329,7 +405,7 @@ FXUnit {
 				};
 				stageSpec[\paramRegex] = stageSpec[\paramRegex] ++ paramName.asString;
 			};
-			stageSpec[\paramRegex] = "(%)([\\.0-9]+)".format(stageSpec[\paramRegex]);
+			stageSpec[\paramRegex] = "(%)([\\.0-9a-zA-Z_]+)".format(stageSpec[\paramRegex]);
 		};
 
 		// Build general FX stage parsing regex
@@ -340,28 +416,30 @@ FXUnit {
 			};
 			stageRegex = stageRegex ++ stageName.asString;
 		};
-		stageRegex = "(%)(\\([\ \\.a-z0-9]+\\))?".format(stageRegex);
+		stageRegex = "(%|[a-zA-Z0-9_]+)(\\([\ \\.a-zA-Z_0-9]*\\))".format(stageRegex);
 
 		"FX: Compiled stage regex: '%'".format(stageRegex).warn;
 	}
 
 
-	*new {|name, parent, numInputChannels, server|
-		^super.new.pr_init(name, parent, numInputChannels, server);
+	*new {|name, parent, numInputChannels|
+		^super.new.pr_init(name, parent, numInputChannels);
 	}
 
-	pr_init {|name, parent, numInputChannels, server|
+	pr_init {|name, parent, numInputChannels|
 		id = name;
 		parentFX = parent;
 		ndefid = ("fxunit_"++name).asSymbol;
 		inChannels = numInputChannels;
-		inBus = Bus.audio(server, inChannels);
+		inBus = Bus.audio(parentFX.server, inChannels);
 		inputs = Dictionary.new; // input processes to this unit
 		gain = 1.0;
 
 		code = Dictionary.new;
 
 		// Code for a simple passthrough
+		// TODO: In or InFeedback ? Make this an optional argument... ?
+		//code[\head] = "var sig, v1, v2, v3; sig = InFeedback.ar('inbus'.kr(%), %) * 'inamp'.kr(1.0, 0.5);".format(inBus.index, inChannels);
 		code[\head] = "var sig, v1, v2, v3; sig = In.ar('inbus'.kr(%), %) * 'inamp'.kr(1.0, 0.5);".format(inBus.index, inChannels);
 		code[\dsp] = List.new;
 		code[\tail] = "sig * 'outamp'.kr(1.0);";
@@ -381,15 +459,47 @@ FXUnit {
 		// Lex/parse separate stages
 		lex = desc.stripWhiteSpace.findRegexp(FXUnit.stageRegex);
 
+		if(FX.verbose) {
+			"Lex (%): \n   %".format(FXUnit.stageRegex, lex).postln;
+		};
+
 		// FIRST PASS: automatic lexical parsing of fx stage params based on FX.stageDescs
+		//             also checks for "boutique" stages in the form of ndefs...
 		idx=0;
 		while { idx < lex.size } { // for each stage...
 			var paramidx, paramlex, codebuilder;
 			var stageType = lex[idx+1][1].asSymbol; // get the stage name
-			var newStage, stageList, stageIndex, stageDesc = FXUnit.stageDescs.at(stageType);
+			var newStage, stageList, stageIndex;
+			var stageDesc = FXUnit.stageDescs.at(stageType);
+
+			if(FX.verbose) {
+				"Parsing... stage '%'".format(stageType).postln;
+			};
 
 			if(stageDesc.isNil) {
-				LangError("Invalid DSP stage type '%'".format(stageType)).throw;
+				// Check if the stage name is actually an ndef..
+				//    if it is, then add that ndef as a stage to the chain code..
+				if( Ndef.dictFor(parentFX.server).existingProxies.includes(stageType) ) {
+					if(FX.verbose) { "Found ndef '%' in FX Unit %".format(stageType, id).warn };
+
+					// so how do we represent the ndef in the chain / stagesByType?
+					stageList = stagesByType.at(\ndef);
+					if(stageList.isNil) {
+						stageList = List.new;
+						stagesByType.put(\ndef, stageList);
+						stageIndex = 0;
+					} {
+						stageIndex = stageList.size;
+					};
+
+					newStage = Dictionary.newFrom([\type, \ndef, \id, stageType, \idx, stageIndex]);
+					stageList.add(newStage);
+					chain.add(newStage);
+
+				} { // If not, throw a lang error..
+					LangError("Invalid FX stage or ndef name '%'".format(stageType)).throw;
+				};
+
 			} {
 				paramlex = lex[idx+2][1].findRegexp(stageDesc[\paramRegex]);
 				paramidx = 0;
@@ -418,11 +528,26 @@ FXUnit {
 					var paramName, paramVal, paramDesc;
 
 					paramName = paramlex[paramidx+1][1].asSymbol;
-					paramVal = paramlex[paramidx+2][1].asFloat;
+					paramVal = paramlex[paramidx+2][1];
 					paramDesc = stageDesc[paramName];
+					//if(FX.verbose) { "Read param '%' with val '%' and desc '%'".format(paramName, paramVal, paramDesc).warn;  };
 					switch(paramDesc[0],
-						Integer, { paramVal = paramVal.asInteger },
-						Float, { paramVal = paramVal }, // it's already a float!
+						Integer, {
+							if(paramVal.isInteger) {
+								paramVal = paramVal.asInteger;
+							} {
+								LangError("Invalid int param value '%' '%'".format(paramName, paramVal)).throw;
+							};
+
+						},
+						Float, {
+							if(paramVal.isFloat) {
+								paramVal = paramVal.asFloat;
+							} {
+								LangError("Invalid float param value '%' '%'".format(paramName, paramVal)).throw;
+							};
+						},
+						Symbol, { paramVal = paramVal.asSymbol },
 						{ LangError("Invalid param desc '%'".format(paramDesc)).throw; }
 					);
 
@@ -436,16 +561,45 @@ FXUnit {
 
 		}; // ...END FIRST PASS...
 
-		// TODO: Maybe put this into its own method? Or into buildNdef?
 		// SECOND PASS: translate parsed stages into UGen code....
+		// TODO: Maybe put this into its own method? Or into buildNdef?
 		dsp = List.new;
 		chain.do {|st|
 			var sid = st[\type].asString ++ st[\idx].asString;
 
 			switch(st[\type],
-				\in, { // MONO INPUT bs, pr, pn
+				\ndef, { // NDEF
+					var ndefname = st[\id];
+					"Parsing Ndef '%'".format(ndefname).warn;
+					dsp.add("sig = sig + Ndef.ar('%');".format(ndefname));
+				},
+
+				\in, { // MONO SOUNDIN INPUT bs, pr, pn
 					var inbus = st[\bs], preamp = st[\pr], pan = st[\pn];
 					dsp.add("sig = sig + Pan2.ar(SoundIn.ar('%_bs'.kr(%)), '%_pn'.kr(%), '%_pr'.kr(%));".format(sid, inbus, sid, pan, sid, preamp));
+				},
+
+				\xin, { // ARBITRARY AUDIO BUS INPUT: bs, ch, pr, pn
+					var inbus = st[\bs], numchans = st[\ch], preamp = st[\pr], pan = st[\pn];
+
+					if(numchans == 1) { // mono
+						if(pan.isNil) { pan = 0.0 };
+						dsp.add("sig = sig + Pan2.ar(InFeedback.ar('%_bs'.kr(%), %), '%_pn'.kr(%), '%_pr'.kr(%));".format(sid, inbus, numchans, sid, pan, sid, preamp));
+					} { // multichannel
+						if(pan.isNil) {
+							// No pan control, use multichannel signal as-is
+							dsp.add("sig = sig + (InFeedback.ar('%_bs'.kr(%), %) * '%_pr'.kr(%));".format(sid, inbus, numchans, sid, preamp));
+						} {
+							// Multichan mixed to mono, then panned
+							dsp.add("sig = sig + Pan2.ar(InFeedback.ar('%_bs'.kr(%), %).sum, '%_pn'.kr(%),  '%_pr'.kr(%));".format(sid, inbus, numchans, sid, pan, sid, preamp));
+
+						};
+					};
+
+				},
+				\out, { // OUTPUT bs, pr
+					var outbus = st[\bs], preamp = st[\pr];
+					dsp.add("Out.ar('%_bs'.kr(%), sig * '%_pr'.kr(%));".format(sid, outbus, sid, preamp));
 				},
 				\gn, { // GAIN lv
 					var gainlevel = st[\lv];
@@ -463,7 +617,7 @@ FXUnit {
 							varfunc = ["LFNoise2.ar('%_vr'.kr(%), mul: '%_pv'.kr(%))",
 								"SinOsc.ar('%_vr'.kr(%), mul: '%_pv'.kr(%))"][prevar_type-1];
 							varfunc = varfunc.format(sid, prevar_rate, sid, prevar);
-							dsp.add("v2 = (sig * ('%_p'.kr(%) + %));".format(sid, preamp, varfunc));
+							dsp.add("v2 = (sig * ('%_pr'.kr(%) + %));".format(sid, preamp, varfunc));
 
 							distfunc = ["tanh", "softclip"][ws_type-1];
 							dsp.add("sig = (v2.% * v1).madd('%_mx'.kr(%)) + sig.madd(1 - '%_mx'.kr);".format(distfunc, sid, mix, sid));
@@ -509,6 +663,46 @@ FXUnit {
 					dsp.add("sig = v1.madd('%_mx'.kr(%)) + sig.madd( 1 - '%_mx'.kr);".format(sid, mix, sid));
 
 				},
+
+				\cmp, { // COMPRESSOR th, ra, at, re, s_, sb, sl, mx
+					var thresh=st[\th], ratio=st[\ra], attack=st[\at], release=st[\re];
+					var sidechain_sig=st[\s_], sidechain_bus=st[\sb], sidechain_level=st[\sl];
+					var wetdrymix=st[\mx];
+					var control;
+
+					if (sidechain_bus.notNil) { // SIDECHAIN COMPRESSION via input audio bus
+						control = "InFeedback.ar('%_sb'.kr(%))".format(sid, sidechain_bus);
+					};
+
+					if (sidechain_sig.notNil) { // SIDECHAIN COMPRESSION via ndef or fxunit
+						var ndefname, fxunit;
+						fxunit = parentFX.at(sidechain_sig);
+						if( fxunit.notNil ) { // 1. check if sidechain is a fx bus name... if so, grab its ndef
+							ndefname = fxunit.ndefid;
+						} {
+							ndefname = sidechain_sig;
+						};
+
+						if( Ndef.dictFor(parentFX.server).existingProxies.includes(ndefname) ) {
+							// 2. check for ndef name
+							if(FX.verbose) { "Found ndef '%' for sidechain compressor input in FX Unit '%'".format(ndefname, id).warn };
+							control = "Ndef('%')".format(ndefname);
+						} {
+							// 3. sidechain is neither FX Unit nor Ndef.. throw error
+							LangError("Invalid FX unit or ndef name in sidechain cmp: '%'".format(ndefname)).throw;
+						};
+
+					};
+
+					if (control.isNil) { // REGULAR COMPRESSION
+						control = "sig";
+					};
+
+					dsp.add("v1 = Compander.ar(sig, % * '%_sl'.kr(%), '%_th'.kr(%), 1.0, '%_ra'.kr(%), '%_at'.kr(%), '%_re'.kr(%));".format(control, sid, sidechain_level, sid, thresh, sid, ratio, sid, attack, sid, release));
+					dsp.add("sig = v1.madd('%_mx'.kr(%)) + sig.madd( 1 - '%_mx'.kr );".format(sid, wetdrymix, sid));
+
+				},
+
 				{ LangError("Invalid DSP stage named '%'".format(st[\type])).throw; }
 			);
 
@@ -563,8 +757,8 @@ FXUnit {
 
 	// set individual fx stage parameters
 	// this only works once the ndef has been built..
-	//   Note: paramValue is set directly on the compiled ndef, so it can
-	//         so it can also be a nodeproxy
+	//   Note: paramValue is set directly on the compiled ndef,
+	//         so paramValue can also be a nodeproxy
 	set {|stageName, paramName, paramValue|
 		if(ndef.notNil) {
 			var ndefParamName = "%_%".format(stageName, paramName).asSymbol;
@@ -614,6 +808,7 @@ FXUnit {
 		^this;
 	}
 
+	// TODO:
 	// apply a lfo or other cyclical function to an individual fx stage parameter
 	lfo {
 

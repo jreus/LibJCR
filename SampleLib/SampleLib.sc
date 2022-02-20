@@ -114,7 +114,7 @@ Smpl {
 		liveSamplesByName = Dictionary.new;
 		allGroups = List.new;
 		allTags = List.new;
-		globalSamplesPath = "~/_assets/_samples/".absolutePath;
+		globalSamplesPath = "~/assets/_samples/".absolutePath;
 		this.pr_loadEventTypes;
 	}
 
@@ -140,6 +140,9 @@ Smpl {
 				~dur = ~dur - ~rel;
 			};
 			*/
+
+			//"smpl %   start %   end %".format(~smpl, ~start, ~end).warn;
+
 			if(chans == 1) {
 				~instrument = \smpl_pitchedSample1ch;
 			} {
@@ -152,6 +155,14 @@ Smpl {
 
 		// Playback event for Smpl library
 		Event.addEventType(\smpl, {|s|
+			if(~smpl.isKindOf(SequenceableCollection).and{~smpl.class != String}) {
+				// ~smpl is a sample playback spec [sid, numchannels, start, end, ...]
+				~start = ~smpl[2];
+				if(~smpl[3] >= 0) {
+					~end = ~smpl[3];
+				};
+				~smpl = ~smpl[0];
+			};
 			~buf = Smpl.buf(~smpl);
 			~type = \bufPlay;
 			currentEnvironment.play;
@@ -417,7 +428,8 @@ Smpl {
 		};
 	}
 
-	// When lazyloading is active, preload lets you preload groups of samples
+	// When lazyloading is active, preload lets you preload a group of samples
+	// provided as an array of sample ids
 	*preload {|samples|
 		samples.do {|name|
 			var smp = this.samples[name];
@@ -429,13 +441,36 @@ Smpl {
 		};
 	}
 
+	// Preload a set of samples into memory, organized as a kit
+	// a kit has an id and is given as an array of sample specs
+	// a sample spec is an array of the form [sid, numchannels, begin, end, ...]
+	// where ... are additional fields, for example, the nickname for this sample in the kit
+	*preloadKit {|kitid, kit|
+		// TODO: ignore the id for now until the kit building system is implemented in the GUI
+		kit.do {|spec|
+			var smp = this.samples[spec[0]];
+			if(smp.isNil) {
+				"Sample '%' does not exist for kit '%', ignored".format(spec[0], kitid).error;
+			} {
+				smp.loadFileIntoBuffer;
+			}
+		}
+	}
+
+	// Preload a set of samples into memory, organized as a dictionary of kits
+	// usually a composition or other project will consist of such a named set of kits
+	*preloadKits {|kitsDict|
+		kitsDict.keysValuesDo {|kitid, kit|
+			Smpl.preloadKit(kitid, kit);
+		}
+	}
+
 	// Returns the SampleFile for a given name
 	*at {|name, autoload=true, loadAction|
 		var sample, result = nil;
 		this.pr_checkServerAlive({^nil});
 		sample = this.samples[name];
 		if(sample.isNil) {
-			"sample '%' not found".format(name).error;
 			^nil
 		};
 		if(autoload) {
@@ -718,7 +753,7 @@ Smpl {
 
 					// insert an array with buffer and selection into the IDE
 					insertArrayBtn.action_({|btn|
-						var doc, arr = sfview.getArrayValuesForCurrentSelection;
+						var doc, arr = sfview.getSampleSpecForCurrentSelection;
 						var insertString = "[\"%\", %, %, %]".format(arr[0], arr[1], arr[2], arr[3]);
 						doc = Document.current;
 						doc.insertAtCursor(insertString);
@@ -761,6 +796,8 @@ Smpl {
 	The sample is played as a simple synth instance. This method returns a reference to
 	the synth instance.
 	*/
+
+
 	*splay {|id, start=0, end=(-1), rate=1.0, amp=1.0, out=0, co=20000, rq=1, pan=0, loops=1, autogate=1|
 		var dur, ch, syn, srate, smp = Smpl.samples.at(id);
 		ch = smp.numChannels;
@@ -778,6 +815,13 @@ Smpl {
 		dur = ((end-start) / srate / rate) * loops;
 
 		^syn;
+	}
+
+	// Convenience method, plays back a sample play spec using splay
+	// a sample play spec is an array of the format
+	// [sf.name, sf.numChannels, start, end]
+	*splaySpec {|spec, rate=1.0, amp=1.0, out=0, co=20000, rq=1, pan=0, loops=1, autogate=1|
+		Smpl.splay(spec[0], spec[2], spec[3], rate, amp, out, co, rq, pan, loops, autogate);
 	}
 
 
@@ -968,7 +1012,7 @@ SampleFileView : CompositeView {
 		^sf.eventString(0.5, st, end);
 	}
 
-	getArrayValuesForCurrentSelection {
+	getSampleSpecForCurrentSelection {
 		var st, len, end;
 		#st,len = sfview.selections[sfview.currentSelection];
 		if(len==0) { end = sf.numFrames } { end = st + len };
@@ -1017,22 +1061,87 @@ LiveSample : SampleFile {
 		super.initMemberData(); // initialize SampleFile data fields
 	}
 
+
+	// listen type can be oneshot or loop
+	pr_getNdefListenerFunc {|ndef, listenType=\oneshot|
+		var code;
+		switch(listenType,
+			\oneshot, {
+				code = "
+{|buf, listenerId=1000, ampThresh=0.01, silenceTimeout=2, releaseAfter=20|
+	var in, amp, timeElapsed, t_timeExpired;
+	var t_trans, firstTrans, recActive, timeSinceTrans, t_recordingStop, t_reachedEnd;
+	in = Ndef.ar('%');
+	amp = Amplitude.kr(in, 0.01, 0.01);
+	t_trans = Changed.kr(amp > ampThresh);
+	firstTrans = Latch.kr(1, t_trans);
+	timeSinceTrans = Sweep.kr(t_trans, 1.0);
+	recActive = (amp > ampThresh) + ((timeSinceTrans < silenceTimeout) * firstTrans);
+	t_recordingStop = (1-recActive) * firstTrans;
+
+	t_reachedEnd = Done.kr(
+		RecordBuf.ar(in, buf, 0, 1.0, run: recActive, loop: 0)
+	);
+
+	timeElapsed = Sweep.kr(1, 1.0);
+	t_timeExpired = timeElapsed > releaseAfter;
+	SendTrig.kr(DC.kr(1), listenerId + 1, 1);
+	SendTrig.kr(t_timeExpired, listenerId + 2, 1);
+	SendTrig.kr(recActive, listenerId + 3, 1);
+	SendTrig.kr(t_recordingStop, listenerId + 4, 1);
+	SendTrig.kr(t_reachedEnd, listenerId + 5, 1);
+	FreeSelf.kr(t_timeExpired + t_reachedEnd + t_recordingStop);
+}
+".format(ndef.key);
+			},
+			\loop, {
+				code = "
+{|buf, listenerId=1000, releaseAfter=200|
+    var insig, amp, timeElapsed, t_timeExpired, t_end;
+	var firstTrans, recActive, timeSinceTrans, t_recordingStop, t_reachedEnd;
+    insig = Ndef.ar('%');
+	timeElapsed = Sweep.kr(1, 1.0);
+	t_end = timeElapsed > releaseAfter;
+	RecordBuf.ar(insig, buf, 0, 1.0, 0.0, 1, 1);
+	SendTrig.kr(DC.kr(1), listenerId + 11, 1);
+	SendTrig.kr(t_end, listenerId + 22, 1);
+	FreeSelf.kr(t_end);
+};
+";
+			},
+			{ "Invalid listenType '%'".format(listenType).throw }
+		);
+
+		^code.interpret;
+	}
+
+	// in can be an input bus num or a ndef
 	catch {|in=0, ampthresh=0.1, silenceThresh=1, timeout=10|
 		if(listenerSynth.notNil) {
 			listenerSynth.free;
 			listenerSynth = nil;
 		};
 
-		// Launch a livesample synth to listen on inbus in
-		listenerSynth = Synth(recordDefName, [
-			\buf, buffer,
-			\listenerId, id,
-			\inbus, in,
-			\ampThresh, ampthresh,
-			\silenceTimeout, silenceThresh,
-			\releaseAfter, timeout
-		], target: listenerGroup, addAction: \addToHead);
+		// Launch a livesample synth to listen to signal source
+		switch(in.class,
+			Integer, { // use ready to go synthdef
+				listenerSynth = Synth(recordDefName, [
+					\buf, buffer,
+					\listenerId, id,
+					\inbus, in,
+					\ampThresh, ampthresh,
+					\silenceTimeout, silenceThresh,
+					\releaseAfter, timeout
+				], target: listenerGroup, addAction: \addToHead);
+			},
+			Ndef, { // create an anonymous synthdef based on recordDefName
+				var fnc = this.pr_getNdefListenerFunc(in, \oneshot);
+				listenerSynth = fnc.play(target: listenerGroup, outbus: 100, addAction: \addToHead, args: [\buf, buffer, \listenerId, id, \ampThresh, 0.1, \silenceTimeout, silenceThresh, \releaseAfter, timeout]);
+			},
+			{ "Invalid input source '%'".format(in).throw; }
+		);
 
+		^this;
 		// liveSampleStatusListenerOSCdef
 		// now controls responding to the status messages
 		// if recording stops or the end of buffer is reached
@@ -1040,25 +1149,38 @@ LiveSample : SampleFile {
 
 	}
 
-	catchStart {|in=0, timeout=30|
+	// loop records to buffer until catchStop is called, or timeout is reached
+	catchStart {|in=0, timeout=3000|
 		if(listenerSynth.notNil) {
 			listenerSynth.free;
 			listenerSynth = nil;
 		};
 
-		// Launch a livesample synth to record indefinitely
-		listenerSynth = Synth(recordLoopDefName, [
-			\buf, buffer,
-			\listenerId, id,
-			\inbus, in,
-			\releaseAfter, timeout
-		], target: listenerGroup, addAction: \addToHead);
+		// Launch a livesample synth to record indefinitely (until timeout)
+		switch(in.class,
+			Integer, { // use ready to go synthdef
 
+				listenerSynth = Synth(recordLoopDefName, [
+					\buf, buffer,
+					\listenerId, id,
+					\inbus, in,
+					\releaseAfter, timeout
+				], target: listenerGroup, addAction: \addToHead);
+			},
+			Ndef, { // create an anonymous synthdef based on recordDefName
+				var fnc = this.pr_getNdefListenerFunc(in, \loop);
+				listenerSynth = fnc.play(target: listenerGroup, outbus: 100, addAction: \addToHead, args: [\buf, buffer, \listenerId, id, \releaseAfter, timeout]);
+			},
+			{ "Invalid input source '%'".format(in).throw; }
+		);
+
+		// TODO:
 		// liveSampleStatusListenerOSCdef
 		// now controls responding to the status messages
 		// if recording stops or the end of buffer is reached
 		//     then free & nil the listenerSynth
 
+		^this;
 	}
 
 	catchStop {
@@ -1066,6 +1188,7 @@ LiveSample : SampleFile {
 			listenerSynth.free;
 			listenerSynth = nil;
 		};
+		^this;
 	}
 
 
@@ -1080,16 +1203,18 @@ LiveSample : SampleFile {
 
 
 	*loadSynthDefs {
+		var added = "";
 
 		if(SynthDescLib.global.synthDescs.at(recordDefName).isNil) {
+			added = added + " " + recordDefName;
 			// listenerId must be evenly divisible by 1000
-			SynthDef(recordDefName, {|buf, listenerId=1000, inbus=0,
+			SynthDef(recordDefName, {|buf, listenerId=1000, inbus=0, insig=0,
 				ampThresh=0.01, silenceTimeout=2, releaseAfter=20|
 
-				var insig, amp, timeElapsed, t_timeExpired;
+				var in, amp, timeElapsed, t_timeExpired;
 				var t_trans, firstTrans, recActive, timeSinceTrans, t_recordingStop, t_reachedEnd;
-				insig = SoundIn.ar(inbus);
-				amp = Amplitude.kr(insig, 0.01, 0.01);
+				in = SoundIn.ar(inbus) + insig;
+				amp = Amplitude.kr(in, 0.01, 0.01);
 				t_trans = Changed.kr(amp > ampThresh);
 				firstTrans = Latch.kr(1, t_trans);
 				timeSinceTrans = Sweep.kr(t_trans, 1.0);
@@ -1097,7 +1222,7 @@ LiveSample : SampleFile {
 				t_recordingStop = (1-recActive) * firstTrans;
 
 				t_reachedEnd = Done.kr(
-					RecordBuf.ar(insig, buf, 0, 1.0, run: recActive, loop: 0)
+					RecordBuf.ar(in, buf, 0, 1.0, run: recActive, loop: 0)
 				);
 				timeElapsed = Sweep.kr(1, 1.0);
 				t_timeExpired = timeElapsed > releaseAfter;
@@ -1115,13 +1240,16 @@ LiveSample : SampleFile {
 
 
 		if(SynthDescLib.global.synthDescs.at(recordLoopDefName).isNil) {
-
-			SynthDef(recordLoopDefName, {|buf, inbus=0, listenerId=1000, releaseAfter=30|
+			added = added + " " + recordLoopDefName;
+			SynthDef(recordLoopDefName, {|buf, in=0, ndefin=0, listenerId=1000, releaseAfter=30|
 				var insig, amp, timeElapsed, t_timeExpired;
 				var t_end;
 				var firstTrans, recActive, timeSinceTrans, t_recordingStop, t_reachedEnd;
 
-				insig = SoundIn.ar(inbus);
+				//insig = Select.ar(ndefin, [SoundIn.ar(in), Ndef.ar(in)]);
+
+				insig = SoundIn.ar(in);
+
 				timeElapsed = Sweep.kr(1, 1.0);
 				t_end = timeElapsed > releaseAfter;
 				RecordBuf.ar(insig, buf, 0, 1.0, 0.0, 1, 1);
@@ -1132,6 +1260,10 @@ LiveSample : SampleFile {
 				FreeSelf.kr(t_end);
 			}).add;
 
+		};
+
+		if(added != "") {
+			"Smpl: Adding synthdefs: %".format(added).warn;
 		};
 
 

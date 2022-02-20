@@ -204,6 +204,17 @@ SymbolProxyManager {
 
 
 
+/* ---------------------------------------------------
+ERROR TYPES
+
+
+---------------------------------------------------  */
+
+// Errors in custom microlanguages
+LangError : Error {
+
+}
+
 
 
 
@@ -251,6 +262,16 @@ Etc.
 	// specific runInTerminal using gnome-terminal
 	runInMintTerminal {
 		"gnome-terminal -- bash -c \"%; exec bash\"".format(this.shellQuote).unixCmd;
+	}
+
+	// Test if a string is a valid float
+	isFloat {
+		^"^[0-9]+[\.][0-9]*$".matchRegexp(this);
+	}
+
+	// Test if a string is a valid int
+	isInteger {
+		^"^[0-9]+$".matchRegexp(this);
 	}
 }
 
@@ -639,6 +660,12 @@ Collections
 
 	note { ^this.collect(_.note); }
 
+	// treat the array as a Smpl playback spec and play it using Smpl.splay()
+	splay {|rate=1.0, amp=1.0, out=0, co=20000, rq=1.0, pan=0, loops=1, autogate=1|
+		Smpl.splaySpec(this, rate, amp, out, co, rq, pan, loops, autogate);
+	}
+
+	// treat the array as a note sequence and play it using the default synth
 	play {|amp, pan, dur=0.5, delta=0.6|
 		{
 			this.do {|note|

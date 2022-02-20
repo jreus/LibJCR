@@ -1,15 +1,22 @@
 /******************************************
-Control Reaper from SuperCollider
+Control Reaper from SuperCollider.
 
 2018 Jonathan Reus
 jonathanreus.com
 info@jonathanreus.com
 
+------------------------------------
+Last Update:
+25 OKT 2021 ~ this module is deeply unfinished
+
+------------------------------------
+
+
+
+------------------------------------
+Notes:
+
 MORE INFO ON REAPER OSC CONTROL CAN BE FOUND HERE:
-
-
-
-
 
 TODO:
 
@@ -43,15 +50,14 @@ and
 
 /* USAGE: *********************
 
-r = Reaper.new("localhost", 8000);
-
-
+ReaBridge.init;
+ReaBridge.fadeTrack(0, 1.0, 0.0, 10);
 
 
 ********************************/
 
 
-Rea {
+ReaBridge {
   classvar <>tracksById, <>tracksByName, <>tr;
   classvar <oscfunc;
   classvar <reaperAddr;
@@ -64,19 +70,39 @@ Rea {
   // Set up MIDI connections & OSC responders
   *init {
     var midiout=nil;
-    MIDIClient.init;
-    // TODO: Make a source select popup window
-    MIDIClient.sources.do {|endpoint|
-      if((endpoint.device == "IAC Driver").and { endpoint.name == "To Reaper" }) {
-        midiout = endpoint;
-      };
-    };
+	if(MIDIClient.initialized.not) {
+		MIDIClient.init;
+	};
+
+	// TODO: Make a source select popup window. For now we just do an OS test..
+	switch(thisProcess.platform.name.asSymbol,
+		\linux, {
+				midiout = MIDIOut(0);
+				midiToReaper = midiout;
+				"Connected to ALSA Midi, make sure ALSA-midi bridge is enabled!".warn;
+
+			},
+		\osx, {
+
+				MIDIClient.sources.do {|endpoint|
+					if((endpoint.device == "IAC Driver").and { endpoint.name == "To Reaper" }) {
+						midiout = endpoint;
+					};
+				};
+
+				midiToReaper = MIDIOut.newByName(midiout.device, midiout.name).latency_(Server.default.latency);
+
+
+			},
+		{
+			"Bad Platform ~ ReaBridge doesn't work on '%'".format(thisProcess.platform.name).throw;
+		}
+	);
+
     if(midiout.isNil) {
-      "MIDI DEVICE NOT FOUND: IAC Driver - To Reaper".throw;
+      "MIDI DEVICE NOT FOUND".throw;
     };
-    // connect midi input from reaper
-    //MIDIIn.connect(0, midiin);
-    midiToReaper = MIDIOut.newByName(midiout.device, midiout.name).latency_(Server.default.latency);
+
     oscToReaper = NetAddr("localhost", 8000);
 
     tracksByName = Dictionary.new;
@@ -93,25 +119,29 @@ Rea {
     //  midi channel, incoming on fromSC IAC bus
     Event.addEventType(\reaperMidi, {|s|
       ~chan = ~chan - 1; // channel numbering offset
-      if(Rea.midiToReaper.isNil) { Rea.init };
+      if(ReaBridge.midiToReaper.isNil) { ReaBridge.init };
       if(~note.class === Symbol) { ~freq = ~note.f };
-      ~midiout = Rea.midiToReaper;
+      ~midiout = ReaBridge.midiToReaper;
       ~type = \midi;
       currentEnvironment.play;
     }, (chan: 1, note: \c5, rootPitch: \c5.f, amp: 0.5));
 
   }
 
-  //****** MIDI ******//
+  //****** MIDI COMMUNICATION ******//
 
 
 
 
 
-  //***** Reaper/SC Control Commands *****//
+  /*-----------------------------------------------------------
 
-  // linear fade of track volume
-  // track 0 is the master track
+	OSC control of Reaper tracks and FX
+
+	fadeTrack, panTrack, bypassFx, setFx, mute, etc...
+  ------------------------------------------------------------*/
+
+	// linear fade of track volume (note: track 0 is the master track)
   *fadeTrack {|tracknum=0, from=0, to=1.0, dur=1|
     ^{
       // convert from linear float amplitude to Reaper DB
@@ -125,7 +155,7 @@ Rea {
     }.fork(AppClock);
   }
 
-  *pan {|tracknum=0, from=0.0, to=0.0, dur=1|
+  *panTrack {|tracknum=0, from=0.0, to=0.0, dur=1|
     ^{
     // scale from SC panning to reaper panning (centered at 0.5)
     from = from.linlin(-1.0, 1.0, 0.0, 1.0);
@@ -144,6 +174,8 @@ Rea {
   *setFx {|tracknum=0, fxnum=0, fxparam=0, value=0.0|
     oscToReaper.sendMsg("/track/%/fx/%/fxparam/%/value".format(tracknum, fxnum, fxparam), value);
   }
+
+  //TODO: rampFx
 
   *mute {|tracknum=0, muteval=1|
     oscToReaper.sendMsg("/track/%/mute".format(tracknum), muteval);
@@ -165,7 +197,10 @@ Rea {
       };
     }.fork(AppClock);
   }
-  //*****END Reaper Control Commands *****//
+
+  /*****
+	END Reaper OSC Control
+  */
 
 
 
@@ -253,6 +288,8 @@ Rea {
 
 }
 
+
+// Abstraction of a Reaper Track
 ReaperTrack {
   var <params;
   var fxunits;
@@ -290,6 +327,7 @@ ReaperTrack {
 
 }
 
+// Abstraction of a Reaper FX
 ReaperFX {
   var params;
   var parentTrack;
