@@ -26,7 +26,6 @@ ws(p10 v1 mx0.99) rev(er0.8 mx0.9) ws(t2 p5 v1 mx0.9) lpf(co1200)
 
 FXHelp {
 
-
 	// Microlang help string
 	*help {
 		"
@@ -344,6 +343,7 @@ FXUnit {
 	var <code;
 
 	var <ndef;
+	var <>fadeTime = 0.02;
 	var <fxStagesChain;  // List : stages in order of signal flow
 	var <fxStagesByType; // Dictionary : stages indexed by type
 
@@ -744,15 +744,18 @@ FXUnit {
 			ndefbuilder.postln;
 		};
 
-		ndef = ndefbuilder.interpret;
-		ndef.set(\inbus, inBus);
 
-		// add this Unit's ndef to the fx proxy sourcelist
-		// where it will get mixed with the
-		// others and sent to the f.masterOut synth
-		if(firstBuild) {
+		if(firstBuild == true) {
+
+			ndef = ndefbuilder.interpret;
 			parentFX.fxmixproxy.add(ndef, 0);
+			ndef.fadeTime = fadeTime;
+		} {
+			ndef.fadeTime = fadeTime;
+			ndef = ndefbuilder.interpret;
+			//ndef.set(\inbus, inBus);
 		};
+
 	}
 
 	// set individual fx stage parameters

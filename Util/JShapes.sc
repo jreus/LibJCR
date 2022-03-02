@@ -30,7 +30,7 @@ Envelopes, Scales, Gestures, Waveshaping Functions and other Shaping Utilities
 	Pbind(*[freq:Pseq(220*r),dur:0.1,amp:0.1]).play;
 
 	*/
-	ratios2 {arg start=0, len=7, step=1;
+	ratios2 {|start=0, len=7, step=1|
 		var startoct, endoct, sc, end, octrange, degrees, zeroidx;
 		var stpos,endpos;
 		degrees = [];
@@ -41,8 +41,8 @@ Envelopes, Scales, Gestures, Waveshaping Functions and other Shaping Utilities
 		octrange = (startoct..endoct);
 		zeroidx = octrange.indexIn(0) * sc.degrees.size;
 		(startoct..endoct).do{|i| degrees = degrees ++ (sc.degrees + (sc.tuning.size * i)) };
-		stpos = (zeroidx + start).asInt;
-		endpos = (stpos + (len*step)).asInt - 1;
+		stpos = (zeroidx + start).asInteger;
+		endpos = (stpos + (len*step)).asInteger - 1;
 		degrees = degrees.copySeries(stpos, stpos+1, endpos).select({|it,i| i % step == 0; });
 		^degrees.midiratio;
 	}
